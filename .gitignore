@@ -1,0 +1,8 @@
+build/
+build-mac/
+dist/
+samples/
+resources/AppIcon.icns
+.vs/
+*.user
+.DS_Store

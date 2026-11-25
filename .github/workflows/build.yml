@@ -1,0 +1,116 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: 6.8.3
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          modules: qtpdf
+          cache: true
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: vcpkg-windows-qpdf-v1
+
+      - name: Install qpdf
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install qpdf:x64-windows-static-md
+
+      - name: Build, test, package
+        shell: pwsh
+        run: ./build-windows.ps1 -Vcpkg $env:VCPKG_INSTALLATION_ROOT
+
+      - name: Screenshot (smoke test)
+        shell: pwsh
+        run: |
+          $env:CORBATA_SCREENSHOT = "$PWD\dist\screenshot-windows.png"
+          & build\Release\corbata_tests.exe --samples "$PWD\samples"
+          Start-Process -Wait "dist\Corbata PDF\Corbata PDF.exe" -ArgumentList "`"$PWD\samples\sample-letter-12-pages.pdf`""
+          if (-not (Test-Path $env:CORBATA_SCREENSHOT)) { throw 'App did not produce a screenshot' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Corbata-PDF-windows
+          path: |
+            dist/Corbata-PDF-windows.zip
+            dist/screenshot-windows.png
+
+  macos:
+    runs-on: macos-latest   # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          arch: clang_64
+          modules: qtpdf
+          cache: true
+
+      - name: Set up vcpkg
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg "$HOME/vcpkg"
+          "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg-cache
+          key: vcpkg-macos-qpdf-v1
+
+      - name: Install qpdf
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          "$HOME/vcpkg/vcpkg" install qpdf:arm64-osx
+
+      - name: Build, test, package
+        run: |
+          chmod +x build-mac.sh
+          VCPKG_ROOT="$HOME/vcpkg" ./build-mac.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Corbata-PDF-macos
+          path: dist/Corbata-PDF-macos.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/Corbata-PDF-windows/Corbata-PDF-windows.zip
+            artifacts/Corbata-PDF-macos/Corbata-PDF-macos.dmg
