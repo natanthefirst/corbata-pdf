@@ -212,3 +212,7 @@
 2026-11-24 22:08:32,756 - aqt.updater - INFO - updater 9484 Patching C:\Qt\6.8.3\msvc2022_64\lib\Qt6Xmld.prl
 2026-11-24 22:08:32,757 - aqt.main - INFO - installer 9484 Finished installation
 2026-11-24 22:08:32,757 - aqt.main - INFO - installer 9484 Time elapsed: 77.88360370 second
+2026-11-25 07:50:56,291 - aqt.helper - DEBUG - helper 9360 Attempt to download checksum at https://download.qt.io/online/qtsdkrepository/mac_x64/desktop/qt6_6103/qt6_6103/Updates.xml.sha256
+2026-11-25 07:50:58,102 - aqt.helper - DEBUG - helper 9360 Attempt to download checksum at https://download.qt.io/online/qtsdkrepository/mac_x64/extensions/qtpdf/6103/clang_64/Updates.xml.sha256
+2026-11-25 07:50:59,819 - aqt.helper - DEBUG - helper 9360 Attempt to download checksum at https://download.qt.io/online/qtsdkrepository/mac_x64/extensions/qtwebengine/6103/clang_64/Updates.xml.sha256
+2026-11-25 07:51:02,016 - aqt.helper - DEBUG - helper 19400 Attempt to download checksum at https://download.qt.io/online/qtsdkrepository/mac_x64/desktop/qt6_6103/qt6_6103/Updates.xml.sha256

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Builds Corbata PDF for macOS and packages it as dist/Corbata-PDF-macos.dmg.
 #
-# Needs: Xcode command line tools, CMake, Qt 6.8 for macOS with the Qt PDF
-# module, and vcpkg with qpdf installed for this Mac's architecture:
-#   vcpkg install qpdf:arm64-osx      (Apple Silicon)
-#   vcpkg install qpdf:x64-osx        (Intel)
+# Needs: Xcode command line tools, CMake, Qt 6.10 for macOS with the Qt PDF
+# module (Qt 6.8 fails to link with the macOS 26 SDK: "framework 'AGL' not
+# found"), and vcpkg with qpdf installed for this Mac's architecture, using
+# this repo's triplets so qpdf targets the same minimum macOS:
+#   vcpkg install qpdf:arm64-osx --overlay-triplets=cmake/triplets   (Apple Silicon)
+#   vcpkg install qpdf:x64-osx   --overlay-triplets=cmake/triplets   (Intel)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-QT_DIR="${QT_ROOT_DIR:-$HOME/Qt/6.8.3/macos}"
+QT_DIR="${QT_ROOT_DIR:-$HOME/Qt/6.10.3/macos}"
 VCPKG="${VCPKG_ROOT:-$HOME/vcpkg}"
 if [[ "$(uname -m)" == "arm64" ]]; then TRIPLET=arm64-osx; else TRIPLET=x64-osx; fi
 BUILD="$ROOT/build-mac"
@@ -26,7 +28,8 @@ cmake -S "$ROOT" -B "$BUILD" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$QT_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$VCPKG/scripts/buildsystems/vcpkg.cmake" \
   -DVCPKG_TARGET_TRIPLET="$TRIPLET" \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+  -DVCPKG_OVERLAY_TRIPLETS="$ROOT/cmake/triplets" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
 cmake --build "$BUILD" --parallel
 ctest --test-dir "$BUILD" --output-on-failure
 

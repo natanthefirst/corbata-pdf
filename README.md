@@ -49,7 +49,8 @@ Build, test and package (result in `dist\Corbata PDF\` and `dist\Corbata-PDF-win
 ```
 
 ### macOS
-Run `./build-mac.sh` on a Mac with Qt 6.8.3 (`~/Qt/6.8.3/macos`) and vcpkg (`~/vcpkg`, with `vcpkg install qpdf:arm64-osx`).
+Run `./build-mac.sh` on a Mac with Qt 6.10.3 (`~/Qt/6.10.3/macos`) and vcpkg (`~/vcpkg`, with
+`vcpkg install qpdf:arm64-osx --overlay-triplets=cmake/triplets`). The app needs macOS 13 or newer.
 Or let GitHub build it: pushing to `main` runs `.github/workflows/build.yml`, which builds and tests both platforms and uploads
 `Corbata-PDF-windows.zip` and `Corbata-PDF-macos.dmg` as run artifacts. Pushing a tag like `v1.0.0` also creates a GitHub Release.
 
