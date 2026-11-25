@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "DefaultApp.h"
 #include "Library.h"
 #include "PageGrid.h"
 #include "PageModel.h"
@@ -229,6 +230,10 @@ void MainWindow::createMenusAndToolbar()
     file->addAction(m_exportAct);
     file->addAction(m_splitAct);
     file->addSeparator();
+    if (DefaultApp::isSupported()) {
+        file->addAction(tr("Make &Default PDF App…"), this, [this] { DefaultApp::makeDefault(this); });
+        file->addSeparator();
+    }
     file->addAction(m_closeAct);
     file->addAction(m_quitAct);
 

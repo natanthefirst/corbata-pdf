@@ -32,13 +32,17 @@ set(APP_SOURCES
     src/PageModel.cpp src/PageModel.h
     src/Library.cpp src/Library.h
     src/PreviewDialog.cpp src/PreviewDialog.h
+    src/DefaultApp.cpp src/DefaultApp.h
 )
 
 if(WIN32)
+    list(APPEND APP_SOURCES src/DefaultApp_win.cpp)
     if(EXISTS ${CMAKE_SOURCE_DIR}/resources/app.ico)
         list(APPEND APP_SOURCES resources/app.rc)
     endif()
 elseif(APPLE)
+    enable_language(OBJCXX)
+    list(APPEND APP_SOURCES src/DefaultApp_mac.mm)
     set(MACOSX_BUNDLE_ICON_FILE AppIcon.icns)
     set(APP_ICNS ${CMAKE_SOURCE_DIR}/resources/AppIcon.icns)
     if(EXISTS ${APP_ICNS})
@@ -50,6 +54,13 @@ endif()
 qt_add_executable(CorbataPDF WIN32 MACOSX_BUNDLE ${APP_SOURCES})
 target_compile_definitions(CorbataPDF PRIVATE CORBATA_VERSION="${PROJECT_VERSION}")
 target_link_libraries(CorbataPDF PRIVATE corbata_core Qt6::Widgets Qt6::Pdf)
+if(WIN32)
+    target_link_libraries(CorbataPDF PRIVATE shlwapi shell32)
+elseif(APPLE)
+    target_link_libraries(CorbataPDF PRIVATE "-framework AppKit" "-framework UniformTypeIdentifiers")
+endif()
+# The window icon (the same picture as the .ico / .icns).
+qt_add_resources(CorbataPDF "icon" PREFIX "/" BASE resources FILES resources/AppIcon.png)
 set_target_properties(CorbataPDF PROPERTIES
     OUTPUT_NAME "Corbata PDF"
     MACOSX_BUNDLE_BUNDLE_NAME "Corbata PDF"

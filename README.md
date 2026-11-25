@@ -16,6 +16,7 @@ Pages are copied losslessly (nothing is re-rendered), so output quality is ident
 | **Split** | File ▸ Split into Files: one file per page, or every N pages |
 | **Duplicate / Blank** | Ctrl+D duplicates selected pages, Ctrl+B inserts a blank page (same size as its neighbour) |
 | **Undo / Redo** | Ctrl+Z / Ctrl+Y for every change until you close the document |
+| **Default app** | File ▸ Make Default PDF App (also offered once on first launch). Windows sends you to Settings to confirm; macOS asks for confirmation |
 | **Preview** | Double-click or Space; arrow keys step through pages |
 
 Ctrl+mouse wheel (or the slider in the status bar) changes the thumbnail size. On macOS, Ctrl is ⌘.
@@ -28,6 +29,8 @@ Password-protected PDFs ask for the password; saved output is not encrypted.
 * `src/MainWindow.cpp` – actions, menus, undo (each change stores a snapshot of the page list).
 * `src/PageGrid.cpp` – thumbnail grid, drag-and-drop, drop indicator.
 * `src/Library.cpp` – opened files (kept in memory, so the original can be overwritten on save) and thumbnail rendering.
+* `src/DefaultApp_*.cpp/.mm` – registering as the PDF handler (Windows registry under HKCU / macOS LaunchServices).
+* `resources/make_icon.py` – draws the icon (white Script MT Bold "C" on red 179,11,0).
 * `tests/test_writer.cpp` – checks merge/reorder/rotate/duplicate/blank/export output with qpdf.
 
 ## Building
