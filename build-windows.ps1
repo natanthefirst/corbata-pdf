@@ -1,6 +1,6 @@
 # Builds Corbata PDF for Windows and packages it into dist\Corbata PDF\ (+ a .zip).
 #
-# Needs: Visual Studio 2022 Build Tools (C++), CMake, Qt 6.8 msvc2022_64 with the
+# Needs: Visual Studio 2022 or newer Build Tools (C++), CMake, Qt 6.8 msvc2022_64 with the
 # Qt PDF module, and vcpkg with qpdf installed for x64-windows-static-md:
 #   vcpkg install qpdf:x64-windows-static-md
 param(
@@ -18,7 +18,8 @@ function Invoke-Step([string]$what, [scriptblock]$cmd) {
 }
 
 Invoke-Step 'Configure' {
-    cmake -S $root -B $build -G 'Visual Studio 17 2022' -A x64 `
+    # No -G: CMake picks the newest installed Visual Studio (2022, 2026, ...).
+    cmake -S $root -B $build -A x64 `
         "-DCMAKE_PREFIX_PATH=$QtDir" `
         "-DCMAKE_TOOLCHAIN_FILE=$Vcpkg\scripts\buildsystems\vcpkg.cmake" `
         -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
@@ -37,9 +38,9 @@ Invoke-Step 'Bundle Qt' {
 }
 
 # The MSVC runtime: ship it next to the exe so it runs on PCs without it installed.
-$redist = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT", `
-                              "$env:ProgramFiles\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" `
-                        -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+$redist = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT", `
+                              "$env:ProgramFiles\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" `
+                        -Directory -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
 if ($redist) {
     Copy-Item (Join-Path $redist.FullName '*.dll') $dist
 } else {
