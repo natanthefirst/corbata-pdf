@@ -43,20 +43,19 @@ jobs:
         shell: pwsh
         run: ./build-windows.ps1 -Vcpkg $env:VCPKG_INSTALLATION_ROOT
 
-      - name: Screenshot (smoke test)
+      - name: Smoke test (the app starts and opens a PDF)
         shell: pwsh
         run: |
-          $env:CORBATA_SCREENSHOT = "$PWD\dist\screenshot-windows.png"
+          # The app saves a picture of its window and quits; the picture is only checked, not kept.
+          $env:CORBATA_SCREENSHOT = "$env:RUNNER_TEMP\smoke-test.png"
           & build\Release\corbata_tests.exe --samples "$PWD\samples"
           Start-Process -Wait "dist\Corbata PDF\Corbata PDF.exe" -ArgumentList "`"$PWD\samples\sample-letter-12-pages.pdf`""
-          if (-not (Test-Path $env:CORBATA_SCREENSHOT)) { throw 'App did not produce a screenshot' }
+          if (-not (Test-Path $env:CORBATA_SCREENSHOT)) { throw 'The app did not start' }
 
       - uses: actions/upload-artifact@v4
         with:
           name: Corbata-PDF-windows
-          path: |
-            dist/Corbata-PDF-windows.zip
-            dist/screenshot-windows.png
+          path: dist/Corbata-PDF-windows.zip
 
   macos:
     runs-on: macos-latest   # Apple Silicon

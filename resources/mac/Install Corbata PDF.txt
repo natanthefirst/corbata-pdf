@@ -1,0 +1,50 @@
+INSTALLING CORBATA PDF ON A MAC
+===============================
+
+Corbata PDF needs macOS 13 (Ventura) or newer and runs on Apple Silicon Macs (M1 and later).
+
+
+1. Copy the app into Applications
+---------------------------------
+In this window, drag "Corbata PDF" onto the "Applications" folder next to it.
+
+Then eject this disk (the "Corbata PDF" icon on your desktop or in the Finder sidebar)
+and open your Applications folder. Don't run the app from this disk.
+
+
+2. Open it the first time
+-------------------------
+Corbata PDF isn't notarized by Apple yet, so the first time you open it macOS stops it
+with a message like "Apple could not verify 'Corbata PDF' is free of malware".
+You only have to get past this once.
+
+  a. Double-click Corbata PDF in Applications. When the warning appears, click "Done"
+     (or "OK"), not "Move to Trash".
+  b. Open System Settings > Privacy & Security.
+  c. Scroll down to the Security section. Next to "Corbata PDF was blocked...",
+     click "Open Anyway", and confirm with your password or Touch ID.
+  d. Click "Open" in the next window. From now on it opens normally.
+
+On macOS 13 or 14 you can do this instead: right-click (or Control-click)
+Corbata PDF in Applications, choose "Open", then click "Open".
+
+If macOS says the app "is damaged and can't be opened":
+open Terminal (Applications > Utilities > Terminal), paste this line and press Return:
+
+    xattr -dr com.apple.quarantine "/Applications/Corbata PDF.app"
+
+Then open the app again.
+
+
+3. Make it your default PDF app (optional)
+------------------------------------------
+The first time Corbata PDF starts, it asks whether to become your default app for PDF files.
+You can also choose File > Make Default PDF App at any time. macOS asks you to confirm.
+
+Or do it in Finder: select any PDF, choose File > Get Info, pick Corbata PDF under
+"Open with", and click "Change All...".
+
+
+Uninstalling
+------------
+Drag Corbata PDF from Applications to the Trash.

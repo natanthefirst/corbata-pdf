@@ -39,6 +39,14 @@ cp -R "$BUILD/Corbata PDF.app" "$ROOT/dist/"
 "$QT_DIR/bin/macdeployqt" "$ROOT/dist/Corbata PDF.app" -always-overwrite
 # Ad-hoc signature so Apple Silicon will launch it (not notarized).
 codesign --force --deep --sign - "$ROOT/dist/Corbata PDF.app"
-hdiutil create -volname "Corbata PDF" -srcfolder "$ROOT/dist/Corbata PDF.app" -ov -format UDZO \
+# Disk image contents: the app, a shortcut to Applications to drag it onto,
+# and the installation instructions.
+STAGE="$BUILD/dmg"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp -R "$ROOT/dist/Corbata PDF.app" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+cp "$ROOT/resources/mac/Install Corbata PDF.txt" "$STAGE/"
+hdiutil create -volname "Corbata PDF" -srcfolder "$STAGE" -ov -format UDZO \
   "$ROOT/dist/Corbata-PDF-macos.dmg"
 echo "Done: $ROOT/dist/Corbata-PDF-macos.dmg"

@@ -57,7 +57,8 @@ Run `./build-mac.sh` on a Mac with Qt 6.10.3 (`~/Qt/6.10.3/macos`) and vcpkg (`~
 Or let GitHub build it: pushing to `main` runs `.github/workflows/build.yml`, which builds and tests both platforms and uploads
 `Corbata-PDF-windows.zip` and `Corbata-PDF-macos.dmg` as run artifacts. Pushing a tag like `v1.0.0` also creates a GitHub Release.
 
-The Mac app is ad-hoc signed, not notarized: the first time, right-click it and choose **Open**.
+The Mac app is ad-hoc signed, not notarized. The `.dmg` contains the app, an Applications shortcut and
+[Install Corbata PDF.txt](resources/mac/Install%20Corbata%20PDF.txt), which explains how to get past Gatekeeper the first time.
 
 ### Windows Smart App Control
 If Smart App Control is on, Windows blocks any unsigned program, including one you just built yourself.
