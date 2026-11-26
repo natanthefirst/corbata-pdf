@@ -30,7 +30,7 @@ Password-protected PDFs ask for the password; saved output is not encrypted.
 * `src/PageGrid.cpp` – thumbnail grid, drag-and-drop, drop indicator.
 * `src/Library.cpp` – opened files (kept in memory, so the original can be overwritten on save) and thumbnail rendering.
 * `src/DefaultApp_*.cpp/.mm` – registering as the PDF handler (Windows registry under HKCU / macOS LaunchServices).
-* `resources/make_icon.py` – draws the icon (white Script MT Bold "C" on red 179,11,0).
+* `resources/make_icon.py` – draws the icon (white calligraphy "C" on red 179,11,0).
 * `tests/test_writer.cpp` – checks merge/reorder/rotate/duplicate/blank/export output with qpdf.
 
 ## Building
