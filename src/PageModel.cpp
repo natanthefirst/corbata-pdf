@@ -41,9 +41,10 @@ Qt::ItemFlags PageModel::flags(const QModelIndex &index) const
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled;
 }
 
-void PageModel::setPages(const PageList &pages)
+void PageModel::setState(const PageList &pages, const FieldValues &fields)
 {
     beginResetModel();
     m_pages = pages;
+    m_fields = fields;
     endResetModel();
 }

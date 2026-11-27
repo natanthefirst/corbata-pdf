@@ -86,6 +86,16 @@ void PageDelegate::paint(QPainter *p, const QStyleOptionViewItem &option, const 
         }
     }
 
+    // Fill & Sign marks and changed form values, drawn over the page.
+    const QTransform toPage = pageToTarget(ref, QRectF(page));
+    if (!ref.isBlank()) {
+        const auto *model = qobject_cast<const PageModel *>(index.model());
+        const QHash<QString, QString> changed = model ? model->fieldValues().value(ref.sourceId) : QHash<QString, QString>();
+        if (!changed.isEmpty())
+            FormFields::paint(*p, m_library->fields(ref.sourceId), changed, ref.pageIndex, toPage, false);
+    }
+    Marks::paint(*p, ref.marks, toPage);
+
     p->setPen(QPen(QColor(0, 0, 0, 70), 1));
     p->setBrush(Qt::NoBrush);
     p->drawRect(QRectF(page).adjusted(0.5, 0.5, -0.5, -0.5));

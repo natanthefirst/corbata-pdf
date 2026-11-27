@@ -4,7 +4,7 @@
 #include "PageGrid.h"
 #include "PageModel.h"
 #include "PdfWriter.h"
-#include "PreviewDialog.h"
+#include "PageEditor.h"
 
 #include <QAction>
 #include <QApplication>
@@ -40,14 +40,21 @@ constexpr int kMaxZoom = 420;
 constexpr int kMaxRecent = 8;
 const char *kPdfFilter = QT_TRANSLATE_NOOP("MainWindow", "PDF files (*.pdf *.PDF)");
 
-// Undo is a full snapshot of the (tiny) page list, so every operation is
+// The whole editable state: the page list (with Fill & Sign marks) and the
+// form values the user changed.
+struct DocState {
+    PageList pages;
+    FieldValues fields;
+};
+
+// Undo is a full snapshot of the (small) document state, so every operation is
 // trivially undoable without per-operation inverse logic.
 class SnapshotCommand : public QUndoCommand
 {
 public:
-    using Apply = std::function<void(const PageList &, const QList<quint64> &)>;
-    SnapshotCommand(const QString &text, PageList before, QList<quint64> selBefore,
-                    PageList after, QList<quint64> selAfter, Apply apply)
+    using Apply = std::function<void(const DocState &, const QList<quint64> &)>;
+    SnapshotCommand(const QString &text, DocState before, QList<quint64> selBefore,
+                    DocState after, QList<quint64> selAfter, Apply apply)
         : QUndoCommand(text), m_before(std::move(before)), m_selBefore(std::move(selBefore)),
           m_after(std::move(after)), m_selAfter(std::move(selAfter)), m_apply(std::move(apply))
     {
@@ -56,9 +63,9 @@ public:
     void redo() override { m_apply(m_after, m_selAfter); }
 
 private:
-    PageList m_before;
+    DocState m_before;
     QList<quint64> m_selBefore;
-    PageList m_after;
+    DocState m_after;
     QList<quint64> m_selAfter;
     Apply m_apply;
 };
@@ -192,6 +199,9 @@ void MainWindow::createActions()
                             {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R)});
     m_previewAct = make(tr("&Preview Page"), [this] { preview(); }, {Qt::Key_Space, Qt::Key_Return, Qt::Key_Enter},
                         themed(QIcon::ThemeIcon::ZoomFitBest));
+    m_fillSignAct = make(tr("&Fill && Sign…"), [this] { preview(); }, {QKeySequence(Qt::CTRL | Qt::Key_G)},
+                         themed(QIcon::ThemeIcon::MailMessageNew));
+    m_fillSignAct->setToolTip(tr("Fill in forms, add text and check marks, and sign (Ctrl+G)"));
 
     m_zoomInAct = make(tr("Bigger Thumbnails"), [this] { setZoom(m_zoomSlider->value() + 30); }, {QKeySequence::ZoomIn},
                        themed(QIcon::ThemeIcon::ZoomIn));
@@ -212,6 +222,7 @@ void MainWindow::createActions()
     m_rotRightAct->setIconText(tr("Rotate Right"));
     m_openAct->setIconText(tr("Open"));
     m_saveAct->setIconText(tr("Save"));
+    m_fillSignAct->setIconText(tr("Fill && Sign"));
     m_undoAct->setIconText(tr("Undo"));
     m_redoAct->setIconText(tr("Redo"));
 }
@@ -258,6 +269,7 @@ void MainWindow::createMenusAndToolbar()
     page->addAction(m_rotAllLeftAct);
     page->addAction(m_rotAllRightAct);
     page->addSeparator();
+    page->addAction(m_fillSignAct);
     page->addAction(m_previewAct);
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
@@ -275,6 +287,8 @@ void MainWindow::createMenusAndToolbar()
     tb->addAction(m_openAct);
     tb->addAction(m_appendAct);
     tb->addAction(m_saveAct);
+    tb->addSeparator();
+    tb->addAction(m_fillSignAct);
     tb->addSeparator();
     tb->addAction(m_undoAct);
     tb->addAction(m_redoAct);
@@ -301,9 +315,9 @@ QList<quint64> MainWindow::selectedUids() const
     return uids;
 }
 
-void MainWindow::applyState(const PageList &pages, const QList<quint64> &selection)
+void MainWindow::applyState(const PageList &pages, const FieldValues &fields, const QList<quint64> &selection)
 {
-    m_model->setPages(pages);
+    m_model->setState(pages, fields);
     const QSet<quint64> want(selection.begin(), selection.end());
     QItemSelection sel;
     int first = -1;
@@ -327,8 +341,15 @@ void MainWindow::applyState(const PageList &pages, const QList<quint64> &selecti
 
 void MainWindow::commit(const QString &text, const PageList &after, const QList<quint64> &selectionAfter)
 {
-    m_undo->push(new SnapshotCommand(text, m_model->pages(), selectedUids(), after, selectionAfter,
-                                     [this](const PageList &p, const QList<quint64> &s) { applyState(p, s); }));
+    commitState(text, after, m_model->fieldValues(), selectionAfter);
+}
+
+void MainWindow::commitState(const QString &text, const PageList &pages, const FieldValues &fields,
+                             const QList<quint64> &selectionAfter)
+{
+    m_undo->push(new SnapshotCommand(text, DocState{m_model->pages(), m_model->fieldValues()}, selectedUids(),
+                                     DocState{pages, fields}, selectionAfter,
+                                     [this](const DocState &d, const QList<quint64> &s) { applyState(d.pages, d.fields, s); }));
 }
 
 PageList MainWindow::loadFiles(const QStringList &paths)
@@ -394,7 +415,7 @@ void MainWindow::updateActions()
     const bool hasSel = !sel.isEmpty();
     for (QAction *a : {m_saveAct, m_saveAsAct, m_splitAct, m_closeAct, m_selectAllAct, m_rotAllLeftAct, m_rotAllRightAct, m_insertAct})
         a->setEnabled(hasPages);
-    for (QAction *a : {m_exportAct, m_deleteAct, m_duplicateAct, m_rotLeftAct, m_rotRightAct, m_rot180Act, m_previewAct})
+    for (QAction *a : {m_exportAct, m_deleteAct, m_duplicateAct, m_rotLeftAct, m_rotRightAct, m_rot180Act, m_previewAct, m_fillSignAct})
         a->setEnabled(hasSel);
     m_blankAct->setEnabled(hasPages);
     m_reverseAct->setEnabled(sel.size() > 1 || (!hasSel && m_model->rowCount() > 1));
@@ -437,7 +458,7 @@ void MainWindow::openFiles(const QStringList &paths)
     m_undo->clear();
     // With several files opened at once there is no single original to overwrite.
     m_currentPath = ids.size() == 1 ? m_library->filePath(*ids.begin()) : QString();
-    applyState(refs, {});
+    applyState(refs, {}, {});
     m_undo->setClean();
     if (ids.size() > 1)
         m_undo->resetClean(); // merged result is unsaved
@@ -494,7 +515,7 @@ bool MainWindow::writePdf(const QString &path, const PageList &pages)
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QByteArray bytes;
     QString error;
-    const bool built = PdfWriter::build(pages, m_library->sourceBytes(), bytes, error);
+    const bool built = PdfWriter::build(pages, m_library->sourceBytes(), bytes, error, m_model->fieldValues());
     QApplication::restoreOverrideCursor();
     if (!built) {
         QMessageBox::critical(this, tr("Could not create PDF"), tr("The PDF could not be created.\n\n%1").arg(error));
@@ -636,7 +657,7 @@ void MainWindow::closeDocument()
         return;
     m_undo->clear();
     m_currentPath.clear();
-    applyState({}, {});
+    applyState({}, {}, {});
     m_library->clear();
 }
 
@@ -767,9 +788,18 @@ void MainWindow::preview()
     const QModelIndex cur = m_grid->currentIndex();
     const QList<int> rows = m_grid->selectedRows();
     const int row = cur.isValid() ? cur.row() : (rows.isEmpty() ? -1 : rows.first());
-    if (row < 0)
+    openFillAndSign(row);
+}
+
+void MainWindow::openFillAndSign(int row)
+{
+    if (row < 0 || row >= m_model->rowCount())
         return;
-    PreviewDialog dlg(m_library, m_model, row, this);
+    PageEditor dlg(m_library, m_model, m_undo, row,
+                   [this](const QString &text, const PageList &pages, const FieldValues &fields) {
+                       commitState(text, pages, fields, selectedUids());
+                   },
+                   this);
     dlg.exec();
     const QModelIndex idx = m_model->index(dlg.currentRow(), 0);
     m_grid->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect);
@@ -785,6 +815,7 @@ void MainWindow::showContextMenu(const QPoint &pos)
     if (m_model->rowCount() == 0) {
         menu.addAction(m_openAct);
     } else {
+        menu.addAction(m_fillSignAct);
         menu.addAction(m_previewAct);
         menu.addSeparator();
         menu.addAction(m_rotLeftAct);
@@ -812,10 +843,11 @@ void MainWindow::about()
 {
     QMessageBox::about(this, tr("About Corbata PDF"),
                        tr("<h3>Corbata PDF %1</h3>"
-                          "<p>A small, fast tool for rearranging PDF pages.</p>"
+                          "<p>A small, fast tool for rearranging, filling and signing PDFs.</p>"
                           "<p><b>Tips</b><br>"
                           "Drag thumbnails to reorder. Drag PDF files from your desktop between pages to insert them.<br>"
-                          "Double-click or press Space to preview. Ctrl+mouse wheel resizes thumbnails.</p>"
+                          "Double-click a page (or use Fill &amp; Sign) to type on it, check boxes, fill form fields and sign.<br>"
+                          "Ctrl+mouse wheel resizes thumbnails.</p>"
                           "<p>Built with Qt %2 and qpdf. Pages are copied without re-rendering, so quality is never lost.</p>")
                            .arg(QApplication::applicationVersion(), QString::fromLatin1(qVersion())));
 }

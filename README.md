@@ -44,7 +44,9 @@ The first time the app starts, it offers to become your default app for PDF file
 | **Duplicate / Blank** | Ctrl+D duplicates selected pages, Ctrl+B inserts a blank page (same size as its neighbour) |
 | **Undo / Redo** | Ctrl+Z / Ctrl+Y for every change until you close the document |
 | **Default app** | File ▸ Make Default PDF App (also offered once on first launch). Windows sends you to Settings to confirm; macOS asks for confirmation |
-| **Preview** | Double-click or Space; arrow keys step through pages |
+| **Fill & Sign** | Double-click a page (or Ctrl+G). Type text anywhere, add ✓ / ✗ marks and today's date, and sign: draw, type or import your signature (the last few are remembered). Click, drag to move, drag the corner to resize, Delete to remove. Saving burns these into the page |
+| **Fill in forms** | PDFs with fillable fields: click a field to type, tick boxes, pick radio buttons and drop-down values (Tab moves to the next field). Fields stay fillable after saving |
+| **Page view** | Page Up / Page Down step through pages; Ctrl+mouse wheel zooms |
 
 Ctrl+mouse wheel (or the slider in the status bar) changes the thumbnail size. On macOS, Ctrl is ⌘.
 Password-protected PDFs ask for the password; saved output is not encrypted.
@@ -56,13 +58,18 @@ Everything below is only needed to change and build the app yourself, not to use
 ### How it's built
 
 * C++17, **Qt 6.8** (Windows) / **Qt 6.10** (Mac) (Widgets + Qt PDF for thumbnails), **qpdf** for all PDF writing, CMake.
-* `src/PdfWriter.cpp` – assembles the output PDF from a list of page references (the only code that writes PDFs).
-* `src/MainWindow.cpp` – actions, menus, undo (each change stores a snapshot of the page list).
+* `src/PdfWriter.cpp` – assembles the output PDF from a list of page references (the only code that writes PDFs):
+  copies pages, burns in Fill & Sign marks, fills form fields and carries the form (`/AcroForm`) over.
+* `src/MainWindow.cpp` – actions, menus, undo (each change stores a snapshot of the pages and form values).
+* `src/PageEditor.cpp` – the Fill & Sign page view; `src/SignatureDialog.cpp` – draw / type / import a signature.
+* `src/Marks.cpp` – text, check marks and signatures, drawn identically on screen and in the PDF.
+* `src/FormFields.cpp` – reads fillable form fields with qpdf.
 * `src/PageGrid.cpp` – thumbnail grid, drag-and-drop, drop indicator.
 * `src/Library.cpp` – opened files (kept in memory, so the original can be overwritten on save) and thumbnail rendering.
 * `src/DefaultApp_*.cpp/.mm` – registering as the PDF handler (Windows registry under HKCU / macOS LaunchServices).
 * `resources/make_icon.py` – draws the icon (white calligraphy "C" on red 179,11,0).
 * `tests/test_writer.cpp` – checks merge/reorder/rotate/duplicate/blank/export output with qpdf.
+* `tests/test_fill.cpp` – checks marks, form filling and saving, and (rendering with Qt PDF) that marks land in the right place.
 
 ### Building on Windows
 Prerequisites (one-time): Visual Studio 2022 Build Tools (C++), CMake, Python, then

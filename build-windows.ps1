@@ -25,6 +25,8 @@ Invoke-Step 'Configure' {
         -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
 }
 Invoke-Step 'Build' { cmake --build $build --config Release --parallel }
+# The tests run straight from the build folder, so they need Qt's DLLs on the PATH.
+$env:PATH = "$(Join-Path $QtDir 'bin');$env:PATH"
 Invoke-Step 'Test' { ctest --test-dir $build -C Release --output-on-failure }
 
 $dist = Join-Path $root 'dist\Corbata PDF'

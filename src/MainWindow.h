@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FormFields.h"
 #include "PageRef.h"
 
 #include <QMainWindow>
@@ -23,6 +24,8 @@ public:
     void openFiles(const QStringList &paths);
     // Opens if nothing is open, otherwise appends.
     void openOrAppend(const QStringList &paths);
+    // Opens the Fill & Sign window on a page.
+    void openFillAndSign(int row);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -33,7 +36,9 @@ private:
 
     // ---- state
     void commit(const QString &text, const PageList &after, const QList<quint64> &selectionAfter);
-    void applyState(const PageList &pages, const QList<quint64> &selection);
+    void commitState(const QString &text, const PageList &pages, const FieldValues &fields,
+                     const QList<quint64> &selectionAfter);
+    void applyState(const PageList &pages, const FieldValues &fields, const QList<quint64> &selection);
     QList<quint64> selectedUids() const;
     PageList loadFiles(const QStringList &paths);
     bool maybeSave();
@@ -87,5 +92,5 @@ private:
         *m_splitAct, *m_closeAct, *m_quitAct, *m_undoAct, *m_redoAct, *m_selectAllAct,
         *m_deleteAct, *m_duplicateAct, *m_blankAct, *m_moveEarlierAct, *m_moveLaterAct,
         *m_reverseAct, *m_rotLeftAct, *m_rotRightAct, *m_rot180Act, *m_rotAllLeftAct,
-        *m_rotAllRightAct, *m_previewAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
+        *m_rotAllRightAct, *m_previewAct, *m_fillSignAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
 };

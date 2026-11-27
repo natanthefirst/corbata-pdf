@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FormFields.h"
 #include "PageRef.h"
 
 #include <QByteArray>
@@ -16,8 +17,10 @@ namespace PdfWriter {
 
 // Assembles a brand-new PDF from `pages` (which reference `sources`) using qpdf.
 // Page content is copied losslessly; nothing is re-rendered.
+// - Fill & Sign marks on a page are burned into that page's content.
+// - Form fields are kept fillable; `fields` holds the values the user changed.
 // Returns false and fills `error` on failure.
 bool build(const PageList &pages, const QHash<int, SourceBytes> &sources,
-           QByteArray &out, QString &error);
+           QByteArray &out, QString &error, const FieldValues &fields = {});
 
 } // namespace PdfWriter

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FormFields.h"
 #include "PageRef.h"
 
 #include <QAbstractListModel>
@@ -19,9 +20,12 @@ public:
     Qt::ItemFlags flags(const QModelIndex &index) const override;
 
     const PageList &pages() const { return m_pages; }
-    void setPages(const PageList &pages);
+    // The form values the user changed (shown over the pages until saved).
+    const FieldValues &fieldValues() const { return m_fields; }
+    void setState(const PageList &pages, const FieldValues &fields);
 
 private:
     Library *m_library;
     PageList m_pages;
+    FieldValues m_fields;
 };

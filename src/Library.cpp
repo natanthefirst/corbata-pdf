@@ -8,6 +8,7 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QPdfDocument>
+#include <QPdfDocumentRenderOptions>
 #include <QTimer>
 
 Library::Library(QObject *parent) : QObject(parent)
@@ -87,6 +88,9 @@ Library::LoadResult Library::load(const QString &path, QWidget *dialogParent, in
     id = m_nextId++;
     m_sources.insert(id, Source{path, buffer, doc});
     m_bytes.insert(id, SourceBytes{data, password});
+    const QVector<FieldInfo> fields = FormFields::read(data, password);
+    if (!fields.isEmpty())
+        m_fields.insert(id, fields);
     return LoadResult::Ok;
 }
 
@@ -102,6 +106,7 @@ void Library::clear()
     }
     m_sources.clear();
     m_bytes.clear();
+    m_fields.clear();
 }
 
 void Library::retainOnly(const QSet<int> &keep)
@@ -115,6 +120,7 @@ void Library::retainOnly(const QSet<int> &keep)
         delete it->doc;
         delete it->buffer;
         m_bytes.remove(id);
+        m_fields.remove(id);
         for (auto c = m_cache.begin(); c != m_cache.end();)
             c = (int(c.key() >> 32) == id) ? m_cache.erase(c) : std::next(c);
         it = m_sources.erase(it);
@@ -125,6 +131,13 @@ QPdfDocument *Library::document(int id) const
 {
     auto it = m_sources.constFind(id);
     return it == m_sources.constEnd() ? nullptr : it->doc;
+}
+
+const QVector<FieldInfo> &Library::fields(int id) const
+{
+    static const QVector<FieldInfo> none;
+    auto it = m_fields.constFind(id);
+    return it == m_fields.constEnd() ? none : *it;
 }
 
 QString Library::fileName(int id) const
@@ -154,7 +167,10 @@ QImage Library::render(int id, int page, int px) const
     if (pts.isEmpty())
         pts = QSizeF(612, 792);
     const QSize size = pts.scaled(QSizeF(px, px), Qt::KeepAspectRatio).toSize().expandedTo(QSize(1, 1));
-    return doc->render(page, size);
+    // Draw annotations too: form fields, comments and stamps are part of the page.
+    QPdfDocumentRenderOptions options;
+    options.setRenderFlags(QPdfDocumentRenderOptions::RenderFlag::Annotations);
+    return doc->render(page, size, options);
 }
 
 QImage Library::thumbnail(int id, int page, int px)

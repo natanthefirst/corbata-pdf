@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FormFields.h"
 #include "PdfWriter.h"
 
 #include <QHash>
@@ -38,6 +39,8 @@ public:
     int pageCount(int id) const;
     QSizeF pageSize(int id, int page) const;
     const QHash<int, SourceBytes> &sourceBytes() const { return m_bytes; }
+    // The fillable form fields of a source (empty if it has no form).
+    const QVector<FieldInfo> &fields(int id) const;
 
     // Returns the best cached thumbnail (possibly smaller than asked for, or null)
     // and queues a render at `px` (longest side, in device pixels) if needed.
@@ -60,6 +63,7 @@ private:
     };
     QHash<int, Source> m_sources;
     QHash<int, SourceBytes> m_bytes;
+    QHash<int, QVector<FieldInfo>> m_fields;
     int m_nextId = 0;
 
     struct Request { int id; int page; int px; };
