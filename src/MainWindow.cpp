@@ -4,9 +4,10 @@
 #include "PageGrid.h"
 #include "PageModel.h"
 #include "PdfWriter.h"
-#include "PageEditor.h"
+#include "DocumentView.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDesktopServices>
@@ -25,6 +26,7 @@
 #include <QSet>
 #include <QSettings>
 #include <QSlider>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QToolButton>
@@ -83,19 +85,27 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_grid->setModel(m_model);
     m_grid->setContextMenuPolicy(Qt::CustomContextMenu);
-    setCentralWidget(m_grid);
-    setAcceptDrops(false); // the grid handles drops
+    m_view = new DocumentView(m_library, m_model,
+                              [this](const QString &text, const PageList &pages, const FieldValues &fields) {
+                                  commitState(text, pages, fields, selectedUids());
+                              },
+                              this);
+    m_stack = new QStackedWidget;
+    m_stack->addWidget(m_view); // Mode::View
+    m_stack->addWidget(m_grid); // Mode::Organize
+    setCentralWidget(m_stack);
+    setAcceptDrops(false); // the viewer and the grid handle drops
 
     createActions();
     createMenusAndToolbar();
 
     m_statusLabel = new QLabel;
     statusBar()->addWidget(m_statusLabel, 1);
-    auto *zoomLabel = new QLabel(tr("Thumbnail size"));
+    m_zoomLabel = new QLabel(tr("Thumbnail size"));
     m_zoomSlider = new QSlider(Qt::Horizontal);
     m_zoomSlider->setRange(kMinZoom, kMaxZoom);
     m_zoomSlider->setFixedWidth(160);
-    statusBar()->addPermanentWidget(zoomLabel);
+    statusBar()->addPermanentWidget(m_zoomLabel);
     statusBar()->addPermanentWidget(m_zoomSlider);
     connect(m_zoomSlider, &QSlider::valueChanged, this, [this](int v) { m_grid->setThumbSize(v); });
 
@@ -108,6 +118,12 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_grid, &PageGrid::zoomRequested, this, [this](int d) { setZoom(m_zoomSlider->value() + d * 30); });
     connect(m_grid, &QAbstractItemView::doubleClicked, this, [this] { preview(); });
+    connect(m_view, &DocumentView::filesDropped, this, [this](const QStringList &paths) { openFiles(paths); });
+    connect(m_view, &DocumentView::currentRowChanged, this, [this](int row) {
+        // In the viewer, page commands (rotate, export, ...) act on the page being read.
+        if (m_mode == Mode::View && row >= 0 && row < m_model->rowCount())
+            m_grid->selectionModel()->setCurrentIndex(m_model->index(row, 0), QItemSelectionModel::ClearAndSelect);
+    });
     connect(m_grid, &QWidget::customContextMenuRequested, this, &MainWindow::showContextMenu);
     connect(m_grid->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this] {
         updateActions();
@@ -126,9 +142,44 @@ MainWindow::MainWindow(QWidget *parent)
     if (!restoreGeometry(s.value(QStringLiteral("geometry")).toByteArray()))
         resize(1100, 760);
 
+    setMode(Mode::View);
     updateActions();
     updateStatus();
     updateTitle();
+}
+
+void MainWindow::setMode(Mode mode)
+{
+    m_view->finishEditing();
+    m_mode = mode;
+    m_stack->setCurrentIndex(mode == Mode::View ? 0 : 1);
+    (mode == Mode::View ? m_viewModeAct : m_organizeModeAct)->setChecked(true);
+    m_organizeBar->setVisible(mode == Mode::Organize);
+    m_zoomLabel->setVisible(mode == Mode::Organize);
+    m_zoomSlider->setVisible(mode == Mode::Organize);
+    // Keys that mean something else in the viewer (Delete removes what you
+    // added, Return edits text) only drive page commands in Organize.
+    const bool organize = mode == Mode::Organize;
+    m_deleteAct->setShortcuts(organize ? QList<QKeySequence>{QKeySequence::Delete, QKeySequence(Qt::Key_Backspace)}
+                                       : QList<QKeySequence>{});
+    m_previewAct->setShortcuts(organize ? QList<QKeySequence>{Qt::Key_Space, Qt::Key_Return, Qt::Key_Enter}
+                                        : QList<QKeySequence>{});
+    m_selectAllAct->setShortcuts(organize ? QList<QKeySequence>{QKeySequence::SelectAll} : QList<QKeySequence>{});
+    if (organize) {
+        const int row = m_view->currentRow();
+        if (row >= 0 && row < m_model->rowCount()) {
+            m_grid->selectionModel()->setCurrentIndex(m_model->index(row, 0), QItemSelectionModel::ClearAndSelect);
+            m_grid->scrollTo(m_model->index(row, 0));
+        }
+        m_grid->setFocus();
+    } else {
+        const QList<int> rows = m_grid->selectedRows();
+        if (!rows.isEmpty())
+            m_view->showPage(rows.first());
+        m_view->canvas()->setFocus();
+    }
+    updateActions();
+    updateStatus();
 }
 
 // ------------------------------------------------------------------ setup
@@ -197,11 +248,21 @@ void MainWindow::createActions()
                            {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L)});
     m_rotAllRightAct = make(tr("Rotate All Pages Right"), [this, allRows] { rotateRows(allRows(), 90, tr("Rotate all right")); },
                             {QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R)});
-    m_previewAct = make(tr("&Preview Page"), [this] { preview(); }, {Qt::Key_Space, Qt::Key_Return, Qt::Key_Enter},
+    m_previewAct = make(tr("&Open Page in Viewer"), [this] { preview(); }, {Qt::Key_Space, Qt::Key_Return, Qt::Key_Enter},
                         themed(QIcon::ThemeIcon::ZoomFitBest));
-    m_fillSignAct = make(tr("&Fill && Sign…"), [this] { preview(); }, {QKeySequence(Qt::CTRL | Qt::Key_G)},
-                         themed(QIcon::ThemeIcon::MailMessageNew));
-    m_fillSignAct->setToolTip(tr("Fill in forms, add text and check marks, and sign (Ctrl+G)"));
+
+    // The two ways of working on a document.
+    auto *modes = new QActionGroup(this);
+    m_viewModeAct = make(tr("&View"), [this] { setMode(Mode::View); }, {QKeySequence(Qt::CTRL | Qt::Key_1)},
+                         themed(QIcon::ThemeIcon::DocumentPrintPreview));
+    m_viewModeAct->setToolTip(tr("Read, fill in and sign the document (Ctrl+1)"));
+    m_organizeModeAct = make(tr("&Organize"), [this] { setMode(Mode::Organize); }, {QKeySequence(Qt::CTRL | Qt::Key_2)},
+                             themed(QIcon::ThemeIcon::ViewRestore));
+    m_organizeModeAct->setToolTip(tr("Reorder, rotate, delete, merge and split pages (Ctrl+2)"));
+    for (QAction *a : {m_viewModeAct, m_organizeModeAct}) {
+        a->setCheckable(true);
+        modes->addAction(a);
+    }
 
     m_zoomInAct = make(tr("Bigger Thumbnails"), [this] { setZoom(m_zoomSlider->value() + 30); }, {QKeySequence::ZoomIn},
                        themed(QIcon::ThemeIcon::ZoomIn));
@@ -222,7 +283,6 @@ void MainWindow::createActions()
     m_rotRightAct->setIconText(tr("Rotate Right"));
     m_openAct->setIconText(tr("Open"));
     m_saveAct->setIconText(tr("Save"));
-    m_fillSignAct->setIconText(tr("Fill && Sign"));
     m_undoAct->setIconText(tr("Undo"));
     m_redoAct->setIconText(tr("Redo"));
 }
@@ -269,10 +329,12 @@ void MainWindow::createMenusAndToolbar()
     page->addAction(m_rotAllLeftAct);
     page->addAction(m_rotAllRightAct);
     page->addSeparator();
-    page->addAction(m_fillSignAct);
     page->addAction(m_previewAct);
 
     QMenu *view = menuBar()->addMenu(tr("&View"));
+    view->addAction(m_viewModeAct);
+    view->addAction(m_organizeModeAct);
+    view->addSeparator();
     view->addAction(m_zoomInAct);
     view->addAction(m_zoomOutAct);
 
@@ -285,23 +347,31 @@ void MainWindow::createMenusAndToolbar()
     tb->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     tb->setIconSize(QSize(22, 22));
     tb->addAction(m_openAct);
-    tb->addAction(m_appendAct);
     tb->addAction(m_saveAct);
-    tb->addSeparator();
-    tb->addAction(m_fillSignAct);
     tb->addSeparator();
     tb->addAction(m_undoAct);
     tb->addAction(m_redoAct);
     tb->addSeparator();
-    tb->addAction(m_rotLeftAct);
-    tb->addAction(m_rotRightAct);
-    tb->addSeparator();
-    tb->addAction(m_deleteAct);
-    tb->addAction(m_duplicateAct);
-    tb->addAction(m_blankAct);
-    tb->addSeparator();
-    tb->addAction(m_exportAct);
-    tb->addAction(m_splitAct);
+    tb->addAction(m_viewModeAct);
+    tb->addAction(m_organizeModeAct);
+
+    // Page tools, shown in Organize mode.
+    m_organizeBar = addToolBar(tr("Organize"));
+    m_organizeBar->setObjectName(QStringLiteral("organizeToolbar"));
+    m_organizeBar->setMovable(false);
+    m_organizeBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_organizeBar->setIconSize(QSize(22, 22));
+    m_organizeBar->addAction(m_appendAct);
+    m_organizeBar->addSeparator();
+    m_organizeBar->addAction(m_rotLeftAct);
+    m_organizeBar->addAction(m_rotRightAct);
+    m_organizeBar->addSeparator();
+    m_organizeBar->addAction(m_deleteAct);
+    m_organizeBar->addAction(m_duplicateAct);
+    m_organizeBar->addAction(m_blankAct);
+    m_organizeBar->addSeparator();
+    m_organizeBar->addAction(m_exportAct);
+    m_organizeBar->addAction(m_splitAct);
 }
 
 // ------------------------------------------------------------------ state
@@ -415,12 +485,18 @@ void MainWindow::updateActions()
     const bool hasSel = !sel.isEmpty();
     for (QAction *a : {m_saveAct, m_saveAsAct, m_splitAct, m_closeAct, m_selectAllAct, m_rotAllLeftAct, m_rotAllRightAct, m_insertAct})
         a->setEnabled(hasPages);
-    for (QAction *a : {m_exportAct, m_deleteAct, m_duplicateAct, m_rotLeftAct, m_rotRightAct, m_rot180Act, m_previewAct, m_fillSignAct})
+    for (QAction *a : {m_exportAct, m_deleteAct, m_duplicateAct, m_rotLeftAct, m_rotRightAct, m_rot180Act, m_previewAct})
         a->setEnabled(hasSel);
     m_blankAct->setEnabled(hasPages);
     m_reverseAct->setEnabled(sel.size() > 1 || (!hasSel && m_model->rowCount() > 1));
     m_moveEarlierAct->setEnabled(hasSel && sel.first() > 0);
     m_moveLaterAct->setEnabled(hasSel && sel.last() < m_model->rowCount() - 1);
+    // Organizing several pages at once happens in Organize mode.
+    if (m_mode == Mode::View)
+        for (QAction *a : {m_selectAllAct, m_moveEarlierAct, m_moveLaterAct, m_reverseAct, m_previewAct})
+            a->setEnabled(false);
+    m_viewModeAct->setEnabled(true);
+    m_organizeModeAct->setEnabled(true);
 }
 
 void MainWindow::updateStatus()
@@ -429,7 +505,7 @@ void MainWindow::updateStatus()
     const int s = m_grid->selectedRows().size();
     if (n == 0)
         m_statusLabel->setText(tr("No document open"));
-    else if (s == 0)
+    else if (s == 0 || m_mode == Mode::View)
         m_statusLabel->setText(tr("%n page(s)", nullptr, n));
     else
         m_statusLabel->setText(tr("%n page(s)", nullptr, n) + QStringLiteral("  ·  ") + tr("%n selected", nullptr, s));
@@ -463,7 +539,8 @@ void MainWindow::openFiles(const QStringList &paths)
     if (ids.size() > 1)
         m_undo->resetClean(); // merged result is unsaved
     updateTitle();
-    m_grid->setFocus();
+    setMode(Mode::View);
+    m_view->showPage(0);
 }
 
 void MainWindow::openOrAppend(const QStringList &paths)
@@ -512,6 +589,7 @@ void MainWindow::insertFiles(const QStringList &paths, int row)
 
 bool MainWindow::writePdf(const QString &path, const PageList &pages)
 {
+    m_view->finishEditing();
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QByteArray bytes;
     QString error;
@@ -788,22 +866,10 @@ void MainWindow::preview()
     const QModelIndex cur = m_grid->currentIndex();
     const QList<int> rows = m_grid->selectedRows();
     const int row = cur.isValid() ? cur.row() : (rows.isEmpty() ? -1 : rows.first());
-    openFillAndSign(row);
-}
-
-void MainWindow::openFillAndSign(int row)
-{
-    if (row < 0 || row >= m_model->rowCount())
+    if (row < 0)
         return;
-    PageEditor dlg(m_library, m_model, m_undo, row,
-                   [this](const QString &text, const PageList &pages, const FieldValues &fields) {
-                       commitState(text, pages, fields, selectedUids());
-                   },
-                   this);
-    dlg.exec();
-    const QModelIndex idx = m_model->index(dlg.currentRow(), 0);
-    m_grid->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect);
-    m_grid->scrollTo(idx);
+    setMode(Mode::View);
+    m_view->showPage(row);
 }
 
 void MainWindow::showContextMenu(const QPoint &pos)
@@ -815,7 +881,6 @@ void MainWindow::showContextMenu(const QPoint &pos)
     if (m_model->rowCount() == 0) {
         menu.addAction(m_openAct);
     } else {
-        menu.addAction(m_fillSignAct);
         menu.addAction(m_previewAct);
         menu.addSeparator();
         menu.addAction(m_rotLeftAct);
@@ -846,7 +911,8 @@ void MainWindow::about()
                           "<p>A small, fast tool for rearranging, filling and signing PDFs.</p>"
                           "<p><b>Tips</b><br>"
                           "Drag thumbnails to reorder. Drag PDF files from your desktop between pages to insert them.<br>"
-                          "Double-click a page (or use Fill &amp; Sign) to type on it, check boxes, fill form fields and sign.<br>"
+                          "View mode: click a form field to fill it in; use Text, ✓, ✗, Date and Sign to write on any page.<br>"
+                          "Organize mode (Ctrl+2): double-click a page to read it again.<br>"
                           "Ctrl+mouse wheel resizes thumbnails.</p>"
                           "<p>Built with Qt %2 and qpdf. Pages are copied without re-rendering, so quality is never lost.</p>")
                            .arg(QApplication::applicationVersion(), QString::fromLatin1(qVersion())));

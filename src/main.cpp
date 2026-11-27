@@ -53,19 +53,11 @@ int main(int argc, char *argv[])
         QTimer::singleShot(0, &w, [&w, files] { w.openFiles(files); });
 
     // Test hook: CORBATA_SCREENSHOT=out.png saves a window screenshot and quits.
-    // With CORBATA_SCREENSHOT_EDITOR=1 it shows the Fill & Sign window instead.
     const QString shot = qEnvironmentVariable("CORBATA_SCREENSHOT");
     if (!shot.isEmpty()) {
-        if (qEnvironmentVariableIsSet("CORBATA_SCREENSHOT_EDITOR"))
-            QTimer::singleShot(1200, &w, [&w] { w.openFillAndSign(0); });
         QTimer::singleShot(2500, &w, [&w, shot] {
-            if (QWidget *modal = QApplication::activeModalWidget()) {
-                modal->grab().save(shot);
-                modal->close();
-            } else {
-                w.grab().save(shot);
-            }
-            QTimer::singleShot(0, [] { QApplication::exit(0); });
+            w.grab().save(shot);
+            QApplication::exit(0);
         });
     } else {
         DefaultApp::registerApp();

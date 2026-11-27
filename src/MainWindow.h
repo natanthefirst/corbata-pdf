@@ -5,6 +5,7 @@
 
 #include <QMainWindow>
 
+class DocumentView;
 class Library;
 class PageGrid;
 class PageModel;
@@ -12,6 +13,8 @@ class QAction;
 class QLabel;
 class QMenu;
 class QSlider;
+class QStackedWidget;
+class QToolBar;
 class QUndoStack;
 
 class MainWindow : public QMainWindow
@@ -24,13 +27,15 @@ public:
     void openFiles(const QStringList &paths);
     // Opens if nothing is open, otherwise appends.
     void openOrAppend(const QStringList &paths);
-    // Opens the Fill & Sign window on a page.
-    void openFillAndSign(int row);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    // View: read, fill in and sign. Organize: the page grid.
+    enum class Mode { View, Organize };
+    void setMode(Mode mode);
+
     void createActions();
     void createMenusAndToolbar();
 
@@ -80,6 +85,11 @@ private:
     Library *m_library;
     PageModel *m_model;
     PageGrid *m_grid;
+    DocumentView *m_view = nullptr;
+    QStackedWidget *m_stack = nullptr;
+    QToolBar *m_organizeBar = nullptr;
+    QLabel *m_zoomLabel = nullptr;
+    Mode m_mode = Mode::View;
     QUndoStack *m_undo;
     QString m_currentPath;
     quint64 m_nextUid = 1;
@@ -92,5 +102,5 @@ private:
         *m_splitAct, *m_closeAct, *m_quitAct, *m_undoAct, *m_redoAct, *m_selectAllAct,
         *m_deleteAct, *m_duplicateAct, *m_blankAct, *m_moveEarlierAct, *m_moveLaterAct,
         *m_reverseAct, *m_rotLeftAct, *m_rotRightAct, *m_rot180Act, *m_rotAllLeftAct,
-        *m_rotAllRightAct, *m_previewAct, *m_fillSignAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
+        *m_rotAllRightAct, *m_previewAct, *m_viewModeAct, *m_organizeModeAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
 };

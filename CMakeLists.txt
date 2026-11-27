@@ -33,7 +33,7 @@ add_library(corbata_ui STATIC
     src/PageGrid.cpp src/PageGrid.h
     src/PageModel.cpp src/PageModel.h
     src/Library.cpp src/Library.h
-    src/PageEditor.cpp src/PageEditor.h
+    src/DocumentView.cpp src/DocumentView.h
     src/SignatureDialog.cpp src/SignatureDialog.h
 )
 target_link_libraries(corbata_ui PUBLIC corbata_core Qt6::Widgets Qt6::Pdf)

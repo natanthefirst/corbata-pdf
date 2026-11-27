@@ -1,6 +1,6 @@
 # Corbata PDF
 
-A small, fast desktop app for page-level PDF editing, for Windows and macOS.
+A small, fast desktop app to read, fill in, sign and organize PDFs, for Windows and macOS.
 Pages are copied losslessly (nothing is re-rendered), so output quality is identical to the input.
 
 ## Download and install
@@ -32,6 +32,21 @@ The first time the app starts, it offers to become your default app for PDF file
 
 ## Features
 
+Corbata PDF has two modes, switched with the **View** and **Organize** buttons (Ctrl+1 / Ctrl+2).
+Opening a PDF shows it in View mode.
+
+**View**: read the document and fill it in
+
+| | |
+|---|---|
+| **Read** | All pages in one scroll. Page Up / Page Down jump a page; Ctrl+mouse wheel or − / + zoom; Fit Width / Fit Page |
+| **Fill in forms** | PDFs with fillable fields: click a field to type, tick boxes, pick radio buttons and drop-down values (Tab moves to the next field). Fields stay fillable after saving |
+| **Write on any page** | **Text**: click and type. **✓ Check**, **✗ Cross**, **Date**: one click. Size and black / blue ink in the bar |
+| **Sign** | **Sign…**: draw, type or import your signature (the last few are remembered), then click where it goes. Clicking a signature box in a form places it there |
+| **Change it** | Drag to move, drag the corner to resize, Delete to remove, double-click text to retype. Saving burns these into the page |
+
+**Organize**: work with whole pages
+
 | | |
 |---|---|
 | **Open** | File ▸ Open, Open Recent, drag PDFs onto the window, or pass files on the command line / "Open with" |
@@ -42,13 +57,12 @@ The first time the app starts, it offers to become your default app for PDF file
 | **Export** | Ctrl+E saves just the selected pages as a new PDF |
 | **Split** | File ▸ Split into Files: one file per page, or every N pages |
 | **Duplicate / Blank** | Ctrl+D duplicates selected pages, Ctrl+B inserts a blank page (same size as its neighbour) |
-| **Undo / Redo** | Ctrl+Z / Ctrl+Y for every change until you close the document |
-| **Default app** | File ▸ Make Default PDF App (also offered once on first launch). Windows sends you to Settings to confirm; macOS asks for confirmation |
-| **Fill & Sign** | Double-click a page (or Ctrl+G). Type text anywhere, add ✓ / ✗ marks and today's date, and sign: draw, type or import your signature (the last few are remembered). Click, drag to move, drag the corner to resize, Delete to remove. Saving burns these into the page |
-| **Fill in forms** | PDFs with fillable fields: click a field to type, tick boxes, pick radio buttons and drop-down values (Tab moves to the next field). Fields stay fillable after saving |
-| **Page view** | Page Up / Page Down step through pages; Ctrl+mouse wheel zooms |
+| **Back to reading** | Double-click a page (or press Space) to open it in View mode |
 
-Ctrl+mouse wheel (or the slider in the status bar) changes the thumbnail size. On macOS, Ctrl is ⌘.
+In both modes: **Undo / Redo** (Ctrl+Z / Ctrl+Y) for every change until you close the document, and
+File ▸ Make Default PDF App (also offered once on first launch; Windows sends you to Settings to confirm, macOS asks).
+
+In Organize, Ctrl+mouse wheel (or the slider in the status bar) changes the thumbnail size. On macOS, Ctrl is ⌘.
 Password-protected PDFs ask for the password; saved output is not encrypted.
 
 ## For developers
@@ -61,7 +75,7 @@ Everything below is only needed to change and build the app yourself, not to use
 * `src/PdfWriter.cpp` – assembles the output PDF from a list of page references (the only code that writes PDFs):
   copies pages, burns in Fill & Sign marks, fills form fields and carries the form (`/AcroForm`) over.
 * `src/MainWindow.cpp` – actions, menus, undo (each change stores a snapshot of the pages and form values).
-* `src/PageEditor.cpp` – the Fill & Sign page view; `src/SignatureDialog.cpp` – draw / type / import a signature.
+* `src/DocumentView.cpp` – View mode: continuous page view with Fill & Sign and form filling; `src/SignatureDialog.cpp` – draw / type / import a signature.
 * `src/Marks.cpp` – text, check marks and signatures, drawn identically on screen and in the PDF.
 * `src/FormFields.cpp` – reads fillable form fields with qpdf.
 * `src/PageGrid.cpp` – thumbnail grid, drag-and-drop, drop indicator.

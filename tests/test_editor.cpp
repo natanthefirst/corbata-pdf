@@ -1,10 +1,10 @@
-// Drives the Fill & Sign window with simulated mouse and keyboard input, the
+// Drives the viewer (with its Fill & Sign tools) with simulated mouse and keyboard input, the
 // way a person would, then saves and checks the result.
 // Runs without a screen (QT_QPA_PLATFORM=offscreen).
 
 #include "FormFields.h"
 #include "Library.h"
-#include "PageEditor.h"
+#include "DocumentView.h"
 #include "PageModel.h"
 #include "PdfWriter.h"
 #include "TestPdfs.h"
@@ -88,20 +88,16 @@ int main(int argc, char **argv)
     model.setState(pages, {});
     QUndoStack undo;
 
-    PageEditor editor(&library, &model, &undo, 0,
-                      [&](const QString &text, const PageList &p, const FieldValues &f) {
-                          undo.push(new Snapshot(&model, p, f, text));
-                      });
+    DocumentView editor(&library, &model, [&](const QString &text, const PageList &p, const FieldValues &f) {
+        undo.push(new Snapshot(&model, p, f, text));
+    });
     editor.resize(900, 1000);
     editor.show();
     settle();
 
-    QWidget *canvas = editor.findChild<QScrollArea *>()->widget();
-    // Page points -> canvas pixels (unrotated page, fit to width).
-    auto at = [&](qreal x, qreal y) {
-        const qreal zoom = (canvas->width() - 36) / 612.0;
-        return QPoint(qRound(18 + x * zoom), qRound(18 + y * zoom));
-    };
+    QWidget *canvas = editor.canvas();
+    // Page points on page 1 -> canvas pixels.
+    auto at = [&](qreal x, qreal y) { return editor.canvasPoint(0, QPointF(x, y)); };
     auto value = [&](const char *name) { return model.fieldValues().value(id).value(QString::fromLatin1(name)); };
 
     // --- Text field: click, type, Tab to the next field (same row, to the right).
@@ -149,7 +145,7 @@ int main(int argc, char **argv)
     CHECK(value("state") == QLatin1String("NY"));
 
     // --- Text tool: type on the page.
-    QTest::keyClick(&editor, Qt::Key_T);
+    QTest::keyClick(canvas, Qt::Key_T);
     QTest::mouseClick(canvas, Qt::LeftButton, {}, at(400, 400));
     settle();
     QPlainTextEdit *typing = visibleChild<QPlainTextEdit>(canvas);
@@ -163,12 +159,12 @@ int main(int argc, char **argv)
     CHECK(marks().size() == 1 && marks().value(0).kind == Mark::Text && marks().value(0).text == QLatin1String("Hello"));
 
     // --- Check mark tool, then move it with the Select tool.
-    QTest::keyClick(&editor, Qt::Key_K);
+    QTest::keyClick(canvas, Qt::Key_K);
     QTest::mouseClick(canvas, Qt::LeftButton, {}, at(450, 500));
     settle();
     CHECK(marks().size() == 2 && marks().value(1).kind == Mark::Check);
     CHECK(QLineF(marks().value(1).rect.center(), QPointF(450, 500)).length() < 2);
-    QTest::keyClick(&editor, Qt::Key_Escape); // back to Select
+    QTest::keyClick(canvas, Qt::Key_Escape); // back to Select
     QTest::mousePress(canvas, Qt::LeftButton, {}, at(450, 500));
     for (int i = 1; i <= 5; ++i)
         QTest::mouseMove(canvas, at(450 + 4 * i, 500 + 4 * i));
@@ -177,7 +173,7 @@ int main(int argc, char **argv)
     CHECK(marks().size() == 2 && QLineF(marks().value(1).rect.center(), QPointF(470, 520)).length() < 3);
 
     // --- Delete it, then undo the delete.
-    QTest::keyClick(&editor, Qt::Key_Delete);
+    QTest::keyClick(canvas, Qt::Key_Delete);
     settle();
     CHECK(marks().size() == 1);
     undo.undo();
@@ -208,6 +204,6 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return 1;
     }
-    std::printf("All Fill & Sign window tests passed\n");
+    std::printf("All viewer tests passed\n");
     return 0;
 }
