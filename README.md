@@ -67,7 +67,7 @@ Corbata PDF has three modes, switched with the buttons in the toolbar. Opening a
 | **Duplicate / Blank** | Ctrl+D duplicates selected pages, Ctrl+B inserts a blank page (same size as its neighbour) |
 | **Back to reading** | Double-click a page (or press Space) to open it in View |
 
-**Print** (Ctrl+P or File ▸ Print): opens a print preview (zoom, portrait / landscape, page setup); its Print button picks the printer and pages. Prints filled-in fields and
+**Print** (Ctrl+P or File ▸ Print): all pages, a range, or the current page, with filled-in fields and
 Fill & Sign marks; each page is scaled (and turned if needed) to fit the paper.
 
 In every mode: **Undo / Redo** (Ctrl+Z / Ctrl+Y) for every change until you close the document, and

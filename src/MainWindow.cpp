@@ -24,12 +24,10 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPrintPreviewDialog>
+#include <QPrintDialog>
 #include <QPrinter>
 #include <QPushButton>
 #include <QSaveFile>
-#include <QScreen>
-#include <QTimer>
 #include <QSet>
 #include <QSettings>
 #include <QSlider>
@@ -973,62 +971,38 @@ void MainWindow::print()
         return;
     QPrinter printer(QPrinter::HighResolution);
     printer.setDocName(baseName());
-    printer.setFromTo(1, int(pages.size()));
+    QPrintDialog dlg(&printer, this);
+    dlg.setWindowTitle(tr("Print"));
+    dlg.setOption(QAbstractPrintDialog::PrintPageRange, true);
+    dlg.setOption(QAbstractPrintDialog::PrintCurrentPage, true);
     const QList<int> selected = m_grid->selectedRows();
-    const int current = m_mode == Mode::Edit && !selected.isEmpty() ? selected.first() : m_view->currentRow();
-
-    // Print preview first: it shows every page as it will print, with zoom,
-    // portrait / landscape and page setup. Its Print button opens the system
-    // print dialog (printer, copies, page range); the pages are then drawn
-    // again for the printer, honouring that range.
-    QPrintPreviewDialog preview(&printer, this);
-    preview.setWindowTitle(tr("Print Preview — %1").arg(baseName()));
-    bool failed = false;
-    int printed = 0;
-    connect(&preview, &QPrintPreviewDialog::paintRequested, this, [&](QPrinter *p) {
-        QList<int> rows;
-        switch (p->printRange()) {
-        case QPrinter::PageRange:
-            for (int n = qMax(1, p->fromPage()); n <= p->toPage() && n <= pages.size(); ++n)
-                rows << n - 1;
-            break;
-        case QPrinter::CurrentPage:
-            rows << current;
-            break;
-        case QPrinter::Selection:
-            rows = selected.isEmpty() ? QList<int>{current} : selected;
-            break;
-        default:
-            for (int i = 0; i < pages.size(); ++i)
-                rows << i;
-            break;
-        }
-        failed = !Printing::print(*p, m_library, pages, m_model->fieldValues(), rows, &preview) &&
-                 p->printerState() == QPrinter::Error;
-        printed = int(rows.size());
-    });
-    // Qt's preview toolbar is icons only; label Print and Page setup so they're easy to find.
-    for (QToolBar *bar : preview.findChildren<QToolBar *>())
-        for (QAction *a : bar->actions())
-            if (a->text().contains(QLatin1String("Print"), Qt::CaseInsensitive) ||
-                a->text().contains(QLatin1String("setup"), Qt::CaseInsensitive))
-                if (auto *button = qobject_cast<QToolButton *>(bar->widgetForAction(a)))
-                    button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    const QSize avail = screen() ? screen()->availableSize() : QSize(1280, 900);
-    preview.resize(int(avail.width() * 0.7), int(avail.height() * 0.85));
-    if (qEnvironmentVariableIsSet("CORBATA_SCREENSHOT_PREVIEW")) {
-        // Test hook: save a picture of the preview and close it.
-        QTimer::singleShot(2000, &preview, [&preview] {
-            preview.grab().save(qEnvironmentVariable("CORBATA_SCREENSHOT_PREVIEW"));
-            preview.reject();
-        });
-    }
-    if (preview.exec() != QDialog::Accepted)
+    dlg.setOption(QAbstractPrintDialog::PrintSelection, m_mode == Mode::Edit && selected.size() > 1);
+    dlg.setMinMax(1, int(pages.size()));
+    if (dlg.exec() != QDialog::Accepted)
         return;
-    if (failed)
+
+    QList<int> rows;
+    switch (printer.printRange()) {
+    case QPrinter::PageRange:
+        for (int p = printer.fromPage(); p <= printer.toPage() && p <= pages.size(); ++p)
+            rows << p - 1;
+        break;
+    case QPrinter::CurrentPage:
+        rows << (m_mode == Mode::Edit && !selected.isEmpty() ? selected.first() : m_view->currentRow());
+        break;
+    case QPrinter::Selection:
+        rows = selected;
+        break;
+    default:
+        for (int i = 0; i < pages.size(); ++i)
+            rows << i;
+        break;
+    }
+    if (!Printing::print(printer, m_library, pages, m_model->fieldValues(), rows, this) &&
+        printer.printerState() == QPrinter::Error)
         QMessageBox::warning(this, tr("Print"), tr("The document could not be printed."));
     else
-        statusBar()->showMessage(tr("Sent %n page(s) to the printer", nullptr, printed), 4000);
+        statusBar()->showMessage(tr("Sent %n page(s) to the printer", nullptr, int(rows.size())), 4000);
 }
 
 void MainWindow::showContextMenu(const QPoint &pos)
