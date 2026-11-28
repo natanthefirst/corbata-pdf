@@ -41,6 +41,9 @@ target_link_libraries(corbata_ui PUBLIC corbata_core Qt6::Widgets Qt6::Pdf Qt6::
 if(WIN32)
     # The Windows print dialog with live preview (Windows.Graphics.Printing, C++/WinRT).
     target_sources(corbata_ui PRIVATE src/WinPrint.cpp src/WinPrint.h)
+    # C++/WinRT wants C++20 coroutines (in C++17 mode it uses an old header
+    # that newer Visual Studio versions reject).
+    set_source_files_properties(src/WinPrint.cpp PROPERTIES COMPILE_OPTIONS "/std:c++20")
     target_link_libraries(corbata_ui PUBLIC windowsapp d3d11 d2d1 dxgi windowscodecs ole32)
 endif()
 
