@@ -54,6 +54,8 @@ int main(int argc, char *argv[])
 
     // Test hook: CORBATA_SCREENSHOT=out.png saves a window screenshot and quits.
     const QString shot = qEnvironmentVariable("CORBATA_SCREENSHOT");
+    if (qEnvironmentVariableIsSet("CORBATA_SCREENSHOT_PREVIEW"))
+        QTimer::singleShot(1500, &w, [&w] { w.print(); });
     if (!shot.isEmpty()) {
         QTimer::singleShot(2500, &w, [&w, shot] {
             w.grab().save(shot);
