@@ -10,11 +10,13 @@
 #include "TestPdfs.h"
 
 #include <QApplication>
+#include <QAction>
 #include <QComboBox>
 #include <QFile>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUndoStack>
@@ -99,6 +101,55 @@ int main(int argc, char **argv)
     // Page points on page 1 -> canvas pixels.
     auto at = [&](qreal x, qreal y) { return editor.canvasPoint(0, QPointF(x, y)); };
     auto value = [&](const char *name) { return model.fieldValues().value(id).value(QString::fromLatin1(name)); };
+
+    // --- View mode is read-only: clicks and tool keys do nothing.
+    CHECK(!editor.isFillMode());
+    QTest::mouseClick(canvas, Qt::LeftButton, {}, at(150, 82));
+    QTest::keyClick(canvas, Qt::Key_K);
+    QTest::mouseClick(canvas, Qt::LeftButton, {}, at(450, 500));
+    settle();
+    CHECK(!visibleChild<QLineEdit>(canvas));
+    CHECK(model.fieldValues().isEmpty() && model.pages().at(0).marks.isEmpty() && undo.count() == 0);
+
+    // --- Left / Right turn pages, one page at a time.
+    QTest::keyClick(canvas, Qt::Key_Right);
+    CHECK(editor.currentRow() == 1);
+    QTest::keyClick(canvas, Qt::Key_Right); // already the last page
+    CHECK(editor.currentRow() == 1);
+    QTest::keyClick(canvas, Qt::Key_Left);
+    CHECK(editor.currentRow() == 0);
+
+    // --- Fit Width: the page spans the window's width (minus margins and the
+    // scroll bar) and follows the window size; Fit Page shows all of it.
+    auto action = [&](const char *text) {
+        for (QAction *a : editor.findChildren<QAction *>())
+            if (a->text() == QLatin1String(text))
+                return a;
+        return static_cast<QAction *>(nullptr);
+    };
+    auto pageWidthPx = [&] { return editor.canvasPoint(0, QPointF(612, 0)).x() - editor.canvasPoint(0, QPointF(0, 0)).x(); };
+    QScrollArea *scroll = editor.findChild<QScrollArea *>();
+    CHECK(action("Fit Width") && action("Fit Page"));
+    if (action("Fit Width")) {
+        action("Fit Width")->trigger();
+        settle();
+        const int wide = pageWidthPx();
+        CHECK(wide > scroll->width() - 80 && wide <= scroll->width());
+        editor.resize(700, 1000);
+        settle();
+        CHECK(pageWidthPx() > scroll->width() - 80 && pageWidthPx() <= scroll->width());
+        CHECK(pageWidthPx() < wide);
+        action("Fit Page")->trigger();
+        settle();
+        const int bottom = editor.canvasPoint(0, QPointF(0, 792)).y() - scroll->verticalScrollBar()->value();
+        CHECK(bottom <= scroll->viewport()->height());
+        editor.resize(900, 1000);
+        settle();
+    }
+
+    // --- Fill & Sign mode.
+    editor.setFillMode(true);
+    settle();
 
     // --- Text field: click, type, Tab to the next field (same row, to the right).
     QTest::mouseClick(canvas, Qt::LeftButton, {}, at(150, 82));

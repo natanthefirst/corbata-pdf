@@ -18,12 +18,13 @@ class QComboBox;
 class QLabel;
 class QScrollArea;
 class QSpinBox;
+class QToolBar;
 class QToolButton;
 class ViewCanvas;
 
-// The main reading view: every page in one continuous scroll, with the
-// Fill & Sign tools on top. Type text, add check marks, crosses and the
-// date, sign, and fill in the PDF's own form fields, right on the page.
+// The page view, one page at a time. In View mode it only shows the document;
+// in Fill & Sign mode it adds the tools: type text, add check marks, crosses
+// and the date, sign, and fill in the PDF's own form fields on the page.
 class DocumentView : public QWidget
 {
     Q_OBJECT
@@ -32,10 +33,12 @@ public:
 
     DocumentView(Library *library, PageModel *model, Commit commit, QWidget *parent = nullptr);
 
-    // The page in the middle of the view.
+    // The page being shown.
     int currentRow() const { return m_current; }
-    // Scrolls so `row` is at the top.
     void showPage(int row);
+    // Fill & Sign mode (tools, form filling) or read-only View mode.
+    void setFillMode(bool on);
+    bool isFillMode() const { return m_fill; }
     // Finishes any typing in progress (e.g. before saving).
     void finishEditing();
 
@@ -56,6 +59,7 @@ private:
     friend class ViewCanvas;
     enum class Tool { Select, Text, Check, Cross, Date, Sign };
     enum class Drag { None, Move, Resize };
+    enum class Fit { Page, Width, Custom };
 
     // ---- document
     int rowCount() const;
@@ -69,13 +73,13 @@ private:
 
     // ---- layout and painting
     void layoutPages();
-    QRectF pageRect(int row) const { return m_rects.value(row); }
+    QRectF pageRect(int row) const { return row == m_current ? m_pageRect : QRectF(); }
     QTransform toDevice(int row) const;
     int rowAt(const QPointF &canvasPt) const;
-    void setZoom(qreal pointsToPixels);
-    void fitWidth();
-    void fitPage();
-    void updateCurrent();
+    void setZoom(qreal pointsToPixels); // a custom zoom
+    void zoomTo(qreal pointsToPixels);
+    void setFit(Fit fit);
+    void applyFit();
     QImage pageImage(int row);
     void paintCanvas(QPainter &p, const QRect &exposed);
     void updateCaption();
@@ -114,9 +118,12 @@ private:
     QScrollArea *m_scroll;
     ViewCanvas *m_canvas;
     QLabel *m_empty;
-    QVector<QRectF> m_rects; // page rectangles on the canvas
+    QRectF m_pageRect; // the current page on the canvas
     qreal m_zoom = 1.0;
-    bool m_fitWidth = true;
+    Fit m_fit = Fit::Page;
+    bool m_fill = false;
+    QToolBar *m_toolsBar;
+    QAction *m_fitWidthAct, *m_fitPageAct;
     int m_current = 0;
     struct Cached {
         QString key;

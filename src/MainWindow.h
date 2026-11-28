@@ -32,8 +32,8 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
-    // View: read, fill in and sign. Organize: the page grid.
-    enum class Mode { View, Organize };
+    // View: read only. Fill: Fill & Sign tools on the page. Edit: the page grid.
+    enum class Mode { View, Fill, Edit };
     void setMode(Mode mode);
 
     void createActions();
@@ -87,7 +87,7 @@ private:
     PageGrid *m_grid;
     DocumentView *m_view = nullptr;
     QStackedWidget *m_stack = nullptr;
-    QToolBar *m_organizeBar = nullptr;
+    QToolBar *m_editBar = nullptr;
     QLabel *m_zoomLabel = nullptr;
     Mode m_mode = Mode::View;
     QUndoStack *m_undo;
@@ -102,5 +102,5 @@ private:
         *m_splitAct, *m_closeAct, *m_quitAct, *m_undoAct, *m_redoAct, *m_selectAllAct,
         *m_deleteAct, *m_duplicateAct, *m_blankAct, *m_moveEarlierAct, *m_moveLaterAct,
         *m_reverseAct, *m_rotLeftAct, *m_rotRightAct, *m_rot180Act, *m_rotAllLeftAct,
-        *m_rotAllRightAct, *m_previewAct, *m_viewModeAct, *m_organizeModeAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
+        *m_rotAllRightAct, *m_previewAct, *m_viewModeAct, *m_fillModeAct, *m_editModeAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
 };

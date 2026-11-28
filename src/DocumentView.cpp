@@ -7,6 +7,7 @@
 #include <QComboBox>
 #include <QDate>
 #include <QDragEnterEvent>
+#include <QHBoxLayout>
 #include <QFileInfo>
 #include <QKeyEvent>
 #include <QLabel>
@@ -26,20 +27,12 @@
 
 namespace {
 constexpr int kMargin = 20;      // grey space around the pages, in pixels
-constexpr int kGap = 14;         // between pages
 constexpr qreal kHandle = 10;    // resize handle, in pixels
 constexpr qreal kMinZoom = 0.2;
 constexpr qreal kMaxZoom = 6.0;
 constexpr int kMaxCachedPages = 16;
 const QColor kBlueInk(20, 60, 170);
 const QColor kSurround(0xd6, 0xd6, 0xd6);
-
-// Width available for pages, leaving room for the vertical scroll bar so a
-// horizontal one doesn't appear needlessly.
-int availableWidth(const QScrollArea *scroll)
-{
-    return scroll->width() - scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent) - 2;
-}
 
 QSizeF displaySizeOf(const PageRef &p) { return p.displaySize().isEmpty() ? QSizeF(612, 792) : p.displaySize(); }
 
@@ -84,8 +77,17 @@ protected:
     void wheelEvent(QWheelEvent *e) override
     {
         if (e->modifiers() & Qt::ControlModifier) {
-            m_view->m_fitWidth = false;
             m_view->setZoom(m_view->m_zoom * (e->angleDelta().y() > 0 ? 1.15 : 1 / 1.15));
+            e->accept();
+            return;
+        }
+        if (m_view->m_scroll->verticalScrollBar()->maximum() == 0) {
+            // The whole page is visible: the wheel turns pages.
+            m_wheel += e->angleDelta().y();
+            if (std::abs(m_wheel) >= 120) {
+                m_view->showPage(m_view->m_current + (m_wheel < 0 ? 1 : -1));
+                m_wheel = 0;
+            }
             e->accept();
             return;
         }
@@ -107,6 +109,7 @@ protected:
 
 private:
     DocumentView *m_view;
+    int m_wheel = 0;
 };
 
 // ---------------------------------------------------------------- setup
@@ -114,18 +117,18 @@ private:
 DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QWidget *parent)
     : QWidget(parent), m_library(library), m_model(model), m_commit(std::move(commit))
 {
-    // --- Fill & Sign bar
-    auto *tb = new QToolBar;
+    // --- Fill & Sign tools (only in Fill & Sign mode)
+    m_toolsBar = new QToolBar;
+    QToolBar *tb = m_toolsBar;
     tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    tb->setIconSize(QSize(16, 16));
     m_tools = new QActionGroup(this);
     const struct {
         Tool tool;
         QString text;
         QString tip;
     } tools[] = {
-        {Tool::Select, tr("Select"), tr("Read, fill in form fields, and move or resize what you added (Esc)")},
-        {Tool::Text, tr("Text"), tr("Click on a page to type (T)")},
+        {Tool::Select, tr("Select"), tr("Fill in form fields, and move or resize what you added (Esc)")},
+        {Tool::Text, tr("Text"), tr("Click on the page to type (T)")},
         {Tool::Check, tr("✓ Check"), tr("Click to add a check mark (K)")},
         {Tool::Cross, tr("✗ Cross"), tr("Click to add a cross (X)")},
         {Tool::Date, tr("Date"), tr("Click to add today's date (D)")},
@@ -158,37 +161,48 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
     connect(m_fontSize, &QSpinBox::valueChanged, this, [this] { applyStyleToSelected(); });
     connect(m_color, &QComboBox::currentIndexChanged, this, [this] { applyStyleToSelected(); });
 
-    auto *spacer = new QWidget;
-    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    tb->addWidget(spacer);
-    QAction *prev = tb->addAction(tr("▲"), this, [this] { showPage(m_current - 1); });
-    prev->setToolTip(tr("Previous page (Page Up)"));
+    // --- page navigation and zoom (always shown)
+    auto *nav = new QToolBar;
+    nav->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    QAction *prev = nav->addAction(tr("◀"), this, [this] { showPage(m_current - 1); });
+    prev->setToolTip(tr("Previous page (Left arrow)"));
     m_caption = new QLabel;
-    m_caption->setMinimumWidth(90);
+    m_caption->setMinimumWidth(80);
     m_caption->setAlignment(Qt::AlignCenter);
-    tb->addWidget(m_caption);
-    QAction *next = tb->addAction(tr("▼"), this, [this] { showPage(m_current + 1); });
-    next->setToolTip(tr("Next page (Page Down)"));
-    tb->addSeparator();
-    QAction *zoomOut = tb->addAction(tr("−"), this, [this] { m_fitWidth = false; setZoom(m_zoom / 1.25); });
+    nav->addWidget(m_caption);
+    QAction *next = nav->addAction(tr("▶"), this, [this] { showPage(m_current + 1); });
+    next->setToolTip(tr("Next page (Right arrow)"));
+    nav->addSeparator();
+    QAction *zoomOut = nav->addAction(tr("−"), this, [this] { setZoom(m_zoom / 1.25); });
     zoomOut->setToolTip(tr("Zoom out (Ctrl+mouse wheel)"));
-    QAction *zoomIn = tb->addAction(tr("+"), this, [this] { m_fitWidth = false; setZoom(m_zoom * 1.25); });
+    QAction *zoomIn = nav->addAction(tr("+"), this, [this] { setZoom(m_zoom * 1.25); });
     zoomIn->setToolTip(tr("Zoom in (Ctrl+mouse wheel)"));
-    tb->addAction(tr("Fit Width"), this, [this] { fitWidth(); });
-    tb->addAction(tr("Fit Page"), this, [this] { fitPage(); });
+    m_fitWidthAct = nav->addAction(tr("Fit Width"), this, [this] { setFit(Fit::Width); });
+    m_fitWidthAct->setToolTip(tr("As wide as the window; scroll to see the whole page"));
+    m_fitPageAct = nav->addAction(tr("Fit Page"), this, [this] { setFit(Fit::Page); });
+    m_fitPageAct->setToolTip(tr("The whole page in the window"));
+    for (QAction *a : {m_fitWidthAct, m_fitPageAct})
+        a->setCheckable(true);
+    m_fitPageAct->setChecked(true);
 
-    // --- pages
+    auto *bars = new QHBoxLayout;
+    bars->setContentsMargins(0, 0, 0, 0);
+    bars->setSpacing(0);
+    bars->addWidget(m_toolsBar);
+    bars->addStretch();
+    bars->addWidget(nav);
+
+    // --- the page
     m_canvas = new ViewCanvas(this);
     m_scroll = new QScrollArea;
     m_scroll->setWidget(m_canvas);
     m_scroll->setWidgetResizable(false);
-    m_scroll->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+    m_scroll->setAlignment(Qt::AlignCenter);
     m_scroll->setFrameShape(QFrame::NoFrame);
     QPalette surround = m_scroll->viewport()->palette();
     surround.setColor(QPalette::Window, kSurround);
     m_scroll->viewport()->setPalette(surround);
     m_scroll->viewport()->setAutoFillBackground(true);
-    connect(m_scroll->verticalScrollBar(), &QScrollBar::valueChanged, this, [this] { updateCurrent(); });
 
     m_empty = new QLabel(tr("Open a PDF (Ctrl+O) or drag one here."), m_scroll->viewport());
     m_empty->setAlignment(Qt::AlignCenter);
@@ -198,16 +212,32 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    layout->addWidget(tb);
+    layout->addLayout(bars);
     layout->addWidget(m_scroll, 1);
 
     connect(m_model, &QAbstractItemModel::modelReset, this, [this] { reloadFromModel(); });
+    setFillMode(false);
     reloadFromModel();
 }
 
 QWidget *DocumentView::canvas() const { return m_canvas; }
 
 QPoint DocumentView::canvasPoint(int row, const QPointF &pagePt) const { return toDevice(row).map(pagePt).toPoint(); }
+
+void DocumentView::setFillMode(bool on)
+{
+    finishEditing();
+    m_fill = on;
+    m_toolsBar->setVisible(on);
+    if (!on) {
+        m_selected = 0;
+        m_selRow = -1;
+        m_tool = Tool::Select;
+        m_toolActions[0]->setChecked(true);
+        m_canvas->setCursor(Qt::ArrowCursor);
+    }
+    m_canvas->update();
+}
 
 // ---------------------------------------------------------------- document
 
@@ -258,9 +288,9 @@ void DocumentView::commitField(int row, const QString &name, const QString &valu
 
 void DocumentView::reloadFromModel()
 {
-    // Keep the reading position across edits, undo and page changes.
-    const int keep = m_current;
-    const int scroll = m_scroll->verticalScrollBar()->value();
+    // Stay on the same page (and scroll position) across edits and undo.
+    const int hScroll = m_scroll->horizontalScrollBar()->value();
+    const int vScroll = m_scroll->verticalScrollBar()->value();
     m_drag = Drag::None;
     // Drop cached images of pages that are gone.
     QSet<quint64> live;
@@ -270,13 +300,10 @@ void DocumentView::reloadFromModel()
         it = live.contains(it.key()) ? std::next(it) : m_images.erase(it);
     if (m_selRow >= rowCount())
         m_selRow = -1, m_selected = 0;
-    if (m_fitWidth)
-        fitWidth();
-    else
-        layoutPages();
-    m_scroll->verticalScrollBar()->setValue(scroll);
-    m_current = qBound(0, keep, qMax(0, rowCount() - 1));
-    updateCurrent();
+    m_current = qBound(0, m_current, qMax(0, rowCount() - 1));
+    applyFit();
+    m_scroll->horizontalScrollBar()->setValue(hScroll);
+    m_scroll->verticalScrollBar()->setValue(vScroll);
     updateCaption();
     updateEmptyState();
 }
@@ -291,18 +318,26 @@ void DocumentView::finishEditing()
 
 void DocumentView::layoutPages()
 {
-    m_rects.clear();
-    qreal widest = 0;
-    for (const PageRef &p : m_model->pages())
-        widest = qMax(widest, displaySizeOf(p).width() * m_zoom);
-    const qreal canvasW = qMax<qreal>(widest + 2 * kMargin, availableWidth(m_scroll));
-    qreal y = kMargin;
-    for (const PageRef &p : m_model->pages()) {
-        const QSizeF s = displaySizeOf(p) * m_zoom;
-        m_rects.append(QRectF((canvasW - s.width()) / 2, y, s.width(), s.height()));
-        y += s.height() + kGap;
+    // One page at a time, centred; the scroll area scrolls only if it's bigger
+    // than the window.
+    if (rowCount() == 0) {
+        m_pageRect = QRectF();
+        m_canvas->resize(m_scroll->viewport()->size());
+        m_canvas->update();
+        return;
     }
-    m_canvas->resize(int(canvasW), int(y - kGap + kMargin));
+    const QSizeF s = displaySizeOf(page(m_current)) * m_zoom;
+    // At least as big as the window (so the grey surround fills it), with the
+    // page centred; bigger if the page is.
+    const QSize needed(int(std::ceil(s.width())) + 2 * kMargin, int(std::ceil(s.height())) + 2 * kMargin);
+    const int bar = m_scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
+    QSize canvas = needed.expandedTo(m_scroll->size());
+    if (needed.height() > m_scroll->height())
+        canvas.setWidth(qMax(needed.width(), m_scroll->width() - bar)); // room for the vertical bar
+    if (needed.width() > m_scroll->width())
+        canvas.setHeight(qMax(needed.height(), m_scroll->height() - bar));
+    m_pageRect = QRectF(QPointF((canvas.width() - s.width()) / 2, (canvas.height() - s.height()) / 2), s);
+    m_canvas->resize(canvas);
     m_canvas->update();
 }
 
@@ -310,46 +345,61 @@ QTransform DocumentView::toDevice(int row) const { return pageToTarget(page(row)
 
 int DocumentView::rowAt(const QPointF &pt) const
 {
-    for (int i = 0; i < m_rects.size(); ++i)
-        if (m_rects.at(i).contains(pt))
-            return i;
-    return -1;
+    return (rowCount() > 0 && m_pageRect.contains(pt)) ? m_current : -1;
 }
 
 void DocumentView::setZoom(qreal z)
 {
+    m_fit = Fit::Custom;
+    m_fitWidthAct->setChecked(false);
+    m_fitPageAct->setChecked(false);
+    zoomTo(z);
+}
+
+void DocumentView::zoomTo(qreal z)
+{
     finishEditing();
-    // Keep the same spot of the current page at the top of the view.
-    const int row = m_current;
-    const QRectF before = pageRect(row);
-    const qreal frac = before.height() > 0 ? (m_scroll->verticalScrollBar()->value() - before.top()) / before.height() : 0;
+    // Keep the middle of what you're looking at in the middle.
+    QScrollBar *h = m_scroll->horizontalScrollBar(), *v = m_scroll->verticalScrollBar();
+    const QSize vp = m_scroll->viewport()->size();
+    const qreal fx = m_canvas->width() > 0 ? (h->value() + vp.width() / 2.0) / m_canvas->width() : 0.5;
+    const qreal fy = m_canvas->height() > 0 ? (v->value() + vp.height() / 2.0) / m_canvas->height() : 0.0;
     m_zoom = qBound(kMinZoom, z, kMaxZoom);
     layoutPages();
-    const QRectF after = pageRect(row);
-    if (!after.isEmpty())
-        m_scroll->verticalScrollBar()->setValue(int(after.top() + frac * after.height()));
+    h->setValue(int(fx * m_canvas->width() - vp.width() / 2.0));
+    v->setValue(int(fy * m_canvas->height() - vp.height() / 2.0));
 }
 
-void DocumentView::fitWidth()
+void DocumentView::setFit(Fit fit)
 {
-    m_fitWidth = true;
-    qreal widest = 0;
-    for (const PageRef &p : m_model->pages())
-        widest = qMax(widest, displaySizeOf(p).width());
-    if (widest <= 0)
-        widest = 612;
-    const int avail = availableWidth(m_scroll) - 2 * kMargin;
-    // Readable, not huge: on a wide window a page is shown at most ~135%.
-    setZoom(qMin(1.35, qMax(100, avail) / widest));
+    m_fit = fit;
+    m_fitWidthAct->setChecked(fit == Fit::Width);
+    m_fitPageAct->setChecked(fit == Fit::Page);
+    applyFit();
 }
 
-void DocumentView::fitPage()
+void DocumentView::applyFit()
 {
-    m_fitWidth = false;
+    if (m_fit == Fit::Custom || rowCount() == 0) {
+        layoutPages();
+        return;
+    }
     const QSizeF s = displaySizeOf(page(m_current));
-    const QSize avail = m_scroll->viewport()->size() - QSize(2 * kMargin, 2 * kMargin);
-    setZoom(qMin(avail.width() / s.width(), avail.height() / s.height()));
-    showPage(m_current);
+    const int bar = m_scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
+    const QSize area = m_scroll->size(); // the whole area, scroll bars or not
+    qreal z;
+    if (m_fit == Fit::Width) {
+        // As wide as possible; the page scrolls vertically, so leave room for that bar.
+        const qreal w = area.width() - 2 * kMargin;
+        z = w / s.width();
+        if (s.height() * z + 2 * kMargin > area.height())
+            z = (w - bar) / s.width();
+    } else {
+        z = qMin((area.width() - 2 * kMargin) / s.width(), (area.height() - 2 * kMargin) / s.height());
+    }
+    finishEditing();
+    m_zoom = qBound(kMinZoom, z, kMaxZoom);
+    layoutPages();
 }
 
 void DocumentView::showPage(int row)
@@ -357,27 +407,17 @@ void DocumentView::showPage(int row)
     if (rowCount() == 0)
         return;
     row = qBound(0, row, rowCount() - 1);
-    m_scroll->verticalScrollBar()->setValue(int(pageRect(row).top() - kMargin / 2));
-    m_current = row;
-    updateCaption();
-    emit currentRowChanged(row);
-}
-
-void DocumentView::updateCurrent()
-{
-    // The page covering the upper third of the view.
-    const qreal y = m_scroll->verticalScrollBar()->value() + m_scroll->viewport()->height() / 3.0;
-    int row = m_current;
-    for (int i = 0; i < m_rects.size(); ++i)
-        if (y < m_rects.at(i).bottom() + kGap) {
-            row = i;
-            break;
-        }
-    if (row != m_current && row < rowCount()) {
+    if (row != m_current) {
+        finishEditing();
         m_current = row;
-        updateCaption();
+        m_selected = 0;
+        m_selRow = -1;
+        applyFit(); // pages can differ in size
         emit currentRowChanged(row);
     }
+    m_scroll->horizontalScrollBar()->setValue(0);
+    m_scroll->verticalScrollBar()->setValue(0);
+    updateCaption();
 }
 
 void DocumentView::updateCaption()
@@ -404,16 +444,8 @@ QImage DocumentView::pageImage(int row)
     auto it = m_images.find(p.uid);
     if (it != m_images.end() && it->key == key)
         return it->image;
-    if (m_images.size() >= kMaxCachedPages) {
-        // Forget pages that are far from the view.
-        for (auto c = m_images.begin(); c != m_images.end();) {
-            int r = -1;
-            for (int i = 0; i < rowCount(); ++i)
-                if (m_model->pages().at(i).uid == c.key())
-                    r = i;
-            c = (r < 0 || std::abs(r - row) > kMaxCachedPages / 2) ? m_images.erase(c) : std::next(c);
-        }
-    }
+    if (m_images.size() >= kMaxCachedPages)
+        m_images.clear();
     QImage img = m_library->render(p.sourceId, p.pageIndex, px);
     if (p.rotation)
         img = img.transformed(QTransform().rotate(p.rotation), Qt::SmoothTransformation);
@@ -424,55 +456,52 @@ QImage DocumentView::pageImage(int row)
 void DocumentView::paintCanvas(QPainter &p, const QRect &exposed)
 {
     p.fillRect(exposed, kSurround);
+    if (rowCount() == 0)
+        return;
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
-    for (int row = 0; row < m_rects.size(); ++row) {
-        const QRectF r = m_rects.at(row);
-        if (!r.adjusted(-4, -4, 4, 6).intersects(exposed))
-            continue;
-        const PageRef ref = page(row);
-        p.fillRect(r.translated(2, 3), QColor(0, 0, 0, 55));
-        p.fillRect(r, Qt::white);
-        const QImage img = pageImage(row);
-        if (!img.isNull())
-            p.drawImage(r, img);
+    const int row = m_current;
+    const QRectF r = m_pageRect;
+    const PageRef ref = page(row);
+    p.fillRect(r.translated(2, 3), QColor(0, 0, 0, 55));
+    p.fillRect(r, Qt::white);
+    const QImage img = pageImage(row);
+    if (!img.isNull())
+        p.drawImage(r, img);
 
-        const QTransform t = toDevice(row);
-        if (!ref.isBlank())
-            FormFields::paint(p, fields(row), changedValues(row), ref.pageIndex, t, true);
-        QVector<Mark> shown = marks(row);
-        if (m_textEdit && row == m_editRow)
-            shown.removeIf([this](const Mark &m) { return m.uid == m_editingMark.uid; });
-        Marks::paint(p, shown, t);
+    const QTransform t = toDevice(row);
+    // Fillable fields are tinted only in Fill & Sign mode.
+    if (!ref.isBlank())
+        FormFields::paint(p, fields(row), changedValues(row), ref.pageIndex, t, m_fill);
+    QVector<Mark> shown = marks(row);
+    if (m_textEdit && row == m_editRow)
+        shown.removeIf([this](const Mark &m) { return m.uid == m_editingMark.uid; });
+    Marks::paint(p, shown, t);
 
-        if (row == m_selRow)
-            for (const Mark &m : shown)
-                if (m.uid == m_selected) {
-                    p.setPen(QPen(QColor(40, 110, 255), 1, Qt::DashLine));
-                    p.setBrush(Qt::NoBrush);
-                    p.drawRect(t.mapRect(m.rect).adjusted(-3, -3, 3, 3));
-                    p.setPen(QPen(Qt::white, 1));
-                    p.setBrush(QColor(40, 110, 255));
-                    p.drawRect(handleRect());
-                }
-    }
+    if (m_fill && row == m_selRow)
+        for (const Mark &m : shown)
+            if (m.uid == m_selected) {
+                p.setPen(QPen(QColor(40, 110, 255), 1, Qt::DashLine));
+                p.setBrush(Qt::NoBrush);
+                p.drawRect(t.mapRect(m.rect).adjusted(-3, -3, 3, 3));
+                p.setPen(QPen(Qt::white, 1));
+                p.setBrush(QColor(40, 110, 255));
+                p.drawRect(handleRect());
+            }
 }
 
 void DocumentView::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
-    if (m_fitWidth)
-        fitWidth();
+    applyFit();
     updateEmptyState();
 }
 
 void DocumentView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    if (m_fitWidth && !m_textEdit && !m_fieldEdit)
-        fitWidth();
-    else
-        layoutPages();
+    if (!m_textEdit && !m_fieldEdit)
+        applyFit();
     updateEmptyState();
 }
 
@@ -669,7 +698,8 @@ const FieldInfo *DocumentView::fieldAt(int row, const QPointF &pt, const FieldWi
 
 void DocumentView::canvasPress(QMouseEvent *e)
 {
-    if (e->button() != Qt::LeftButton)
+    m_canvas->setFocus();
+    if (e->button() != Qt::LeftButton || !m_fill)
         return;
     if (m_textEdit) {
         // A click outside the text box finishes typing.
@@ -724,6 +754,8 @@ void DocumentView::canvasPress(QMouseEvent *e)
 
 void DocumentView::canvasMove(QMouseEvent *e)
 {
+    if (!m_fill)
+        return;
     if (m_drag == Drag::None) {
         // Hover feedback.
         Qt::CursorShape shape = m_tool == Tool::Select ? Qt::ArrowCursor : m_tool == Tool::Text ? Qt::IBeamCursor : Qt::CrossCursor;
@@ -794,6 +826,8 @@ void DocumentView::canvasRelease(QMouseEvent *)
 
 void DocumentView::canvasDoubleClick(QMouseEvent *e)
 {
+    if (!m_fill)
+        return;
     const int row = rowAt(e->position());
     if (row < 0)
         return;
@@ -1044,6 +1078,8 @@ void DocumentView::moveToNextField(int direction)
     finishFieldEditor(true);
     // Field info lives in the Library, so the pointers stay valid after the commit.
     const Entry next = list.at((current + direction + list.size()) % list.size());
+    if (next.row != m_current)
+        showPage(next.row);
     openFieldEditor(next.row, *next.field, *next.widget);
 }
 
@@ -1092,6 +1128,32 @@ bool DocumentView::eventFilter(QObject *watched, QEvent *event)
 bool DocumentView::canvasKey(QKeyEvent *event)
 {
     const bool plain = !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
+    const bool nudging = m_fill && m_selected && m_selRow >= 0;
+    switch (event->key()) {
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+        if (!nudging) {
+            showPage(m_current + (event->key() == Qt::Key_Left ? -1 : 1));
+            return true;
+        }
+        break;
+    case Qt::Key_PageUp:
+        showPage(m_current - 1);
+        return true;
+    case Qt::Key_PageDown:
+        showPage(m_current + 1);
+        return true;
+    case Qt::Key_Home:
+        showPage(0);
+        return true;
+    case Qt::Key_End:
+        showPage(rowCount() - 1);
+        return true;
+    default:
+        break;
+    }
+    if (!m_fill)
+        return false; // View mode: arrows up/down scroll
     switch (event->key()) {
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
@@ -1115,24 +1177,6 @@ bool DocumentView::canvasKey(QKeyEvent *event)
                 return true;
             }
         return true;
-    case Qt::Key_PageUp:
-        showPage(m_current - 1);
-        return true;
-    case Qt::Key_PageDown:
-        showPage(m_current + 1);
-        return true;
-    case Qt::Key_Home:
-        if (event->modifiers() & Qt::ControlModifier) {
-            showPage(0);
-            return true;
-        }
-        return false;
-    case Qt::Key_End:
-        if (event->modifiers() & Qt::ControlModifier) {
-            showPage(rowCount() - 1);
-            return true;
-        }
-        return false;
     case Qt::Key_Left:
     case Qt::Key_Right:
     case Qt::Key_Up:
