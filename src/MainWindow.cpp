@@ -4,6 +4,7 @@
 #include "PageGrid.h"
 #include "PageModel.h"
 #include "PdfWriter.h"
+#include "Printing.h"
 #include "DocumentView.h"
 
 #include <QAction>
@@ -23,6 +24,8 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSet>
@@ -273,6 +276,14 @@ void MainWindow::createActions()
     m_exportAct = make(tr("&Export Selected Pages…"), [this] { exportSelected(); },
                        {QKeySequence(Qt::CTRL | Qt::Key_E)}, themed(QIcon::ThemeIcon::DocumentSend));
     m_splitAct = make(tr("S&plit into Files…"), [this] { splitIntoFiles(); }, {}, themed(QIcon::ThemeIcon::EditCut));
+    m_printAct = make(tr("&Print…"), [this] { print(); }, {QKeySequence::Print}, themed(QIcon::ThemeIcon::DocumentPrint));
+    m_findAct = make(tr("&Find…"), [this] {
+        if (m_mode == Mode::Edit)
+            setMode(Mode::View);
+        m_view->showFind();
+    }, {QKeySequence::Find}, themed(QIcon::ThemeIcon::EditFind));
+    m_copyAct = make(tr("&Copy Text"), [this] { m_view->copySelection(); }, {QKeySequence::Copy},
+                     themed(QIcon::ThemeIcon::EditCopy));
     m_closeAct = make(tr("&Close Document"), [this] { closeDocument(); }, {QKeySequence::Close});
     m_quitAct = make(tr("&Quit"), [this] { close(); }, {QKeySequence::Quit});
     m_quitAct->setMenuRole(QAction::QuitRole);
@@ -370,6 +381,8 @@ void MainWindow::createMenusAndToolbar()
     file->addAction(m_exportAct);
     file->addAction(m_splitAct);
     file->addSeparator();
+    file->addAction(m_printAct);
+    file->addSeparator();
     if (DefaultApp::isSupported()) {
         file->addAction(tr("Make &Default PDF App…"), this, [this] { DefaultApp::makeDefault(this); });
         file->addSeparator();
@@ -380,6 +393,9 @@ void MainWindow::createMenusAndToolbar()
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     edit->addAction(m_undoAct);
     edit->addAction(m_redoAct);
+    edit->addSeparator();
+    edit->addAction(m_copyAct);
+    edit->addAction(m_findAct);
     edit->addSeparator();
     edit->addAction(m_selectAllAct);
     edit->addAction(m_deleteAct);
@@ -566,6 +582,9 @@ void MainWindow::updateActions()
     if (m_mode != Mode::Edit)
         for (QAction *a : {m_selectAllAct, m_moveEarlierAct, m_moveLaterAct, m_reverseAct, m_previewAct})
             a->setEnabled(false);
+    m_printAct->setEnabled(hasPages);
+    m_findAct->setEnabled(hasPages);
+    m_copyAct->setEnabled(hasPages && m_mode == Mode::View);
     m_viewModeAct->setEnabled(true);
     m_fillModeAct->setEnabled(hasPages);
     m_editModeAct->setEnabled(true);
@@ -942,6 +961,48 @@ void MainWindow::preview()
         return;
     setMode(Mode::View);
     m_view->showPage(row);
+}
+
+void MainWindow::print()
+{
+    m_view->finishEditing();
+    const PageList pages = m_model->pages();
+    if (pages.isEmpty())
+        return;
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setDocName(baseName());
+    QPrintDialog dlg(&printer, this);
+    dlg.setWindowTitle(tr("Print"));
+    dlg.setOption(QAbstractPrintDialog::PrintPageRange, true);
+    dlg.setOption(QAbstractPrintDialog::PrintCurrentPage, true);
+    const QList<int> selected = m_grid->selectedRows();
+    dlg.setOption(QAbstractPrintDialog::PrintSelection, m_mode == Mode::Edit && selected.size() > 1);
+    dlg.setMinMax(1, int(pages.size()));
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    QList<int> rows;
+    switch (printer.printRange()) {
+    case QPrinter::PageRange:
+        for (int p = printer.fromPage(); p <= printer.toPage() && p <= pages.size(); ++p)
+            rows << p - 1;
+        break;
+    case QPrinter::CurrentPage:
+        rows << (m_mode == Mode::Edit && !selected.isEmpty() ? selected.first() : m_view->currentRow());
+        break;
+    case QPrinter::Selection:
+        rows = selected;
+        break;
+    default:
+        for (int i = 0; i < pages.size(); ++i)
+            rows << i;
+        break;
+    }
+    if (!Printing::print(printer, m_library, pages, m_model->fieldValues(), rows, this) &&
+        printer.printerState() == QPrinter::Error)
+        QMessageBox::warning(this, tr("Print"), tr("The document could not be printed."));
+    else
+        statusBar()->showMessage(tr("Sent %n page(s) to the printer", nullptr, int(rows.size())), 4000);
 }
 
 void MainWindow::showContextMenu(const QPoint &pos)

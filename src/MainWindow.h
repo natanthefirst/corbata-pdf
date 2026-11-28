@@ -69,6 +69,7 @@ private:
     void moveSelection(int direction);
     void reverseSelected();
     void preview();
+    void print();
     void showContextMenu(const QPoint &pos);
     void setZoom(int px);
     void about();
@@ -102,5 +103,5 @@ private:
         *m_splitAct, *m_closeAct, *m_quitAct, *m_undoAct, *m_redoAct, *m_selectAllAct,
         *m_deleteAct, *m_duplicateAct, *m_blankAct, *m_moveEarlierAct, *m_moveLaterAct,
         *m_reverseAct, *m_rotLeftAct, *m_rotRightAct, *m_rot180Act, *m_rotAllLeftAct,
-        *m_rotAllRightAct, *m_previewAct, *m_viewModeAct, *m_fillModeAct, *m_editModeAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
+        *m_rotAllRightAct, *m_previewAct, *m_printAct, *m_findAct, *m_copyAct, *m_viewModeAct, *m_fillModeAct, *m_editModeAct, *m_zoomInAct, *m_zoomOutAct, *m_aboutAct;
 };

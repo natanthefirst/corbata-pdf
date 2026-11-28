@@ -5,7 +5,7 @@ project(CorbataPDF VERSION 2.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Widgets Pdf Test)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Widgets Pdf PrintSupport Test)
 find_package(qpdf CONFIG REQUIRED)
 
 qt_standard_project_setup()
@@ -35,8 +35,9 @@ add_library(corbata_ui STATIC
     src/Library.cpp src/Library.h
     src/DocumentView.cpp src/DocumentView.h
     src/SignatureDialog.cpp src/SignatureDialog.h
+    src/Printing.cpp src/Printing.h
 )
-target_link_libraries(corbata_ui PUBLIC corbata_core Qt6::Widgets Qt6::Pdf)
+target_link_libraries(corbata_ui PUBLIC corbata_core Qt6::Widgets Qt6::Pdf Qt6::PrintSupport)
 
 # --- The app
 set(APP_SOURCES

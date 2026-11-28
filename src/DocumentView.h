@@ -6,6 +6,8 @@
 
 #include <QHash>
 #include <QPointer>
+#include <QPolygonF>
+#include <QTimer>
 #include <QWidget>
 
 #include <functional>
@@ -16,6 +18,7 @@ class QAction;
 class QActionGroup;
 class QComboBox;
 class QLabel;
+class QLineEdit;
 class QScrollArea;
 class QSpinBox;
 class QToolBar;
@@ -41,6 +44,17 @@ public:
     bool isFillMode() const { return m_fill; }
     // Finishes any typing in progress (e.g. before saving).
     void finishEditing();
+
+    // Search: shows the search field; next/previous match (wrapping around).
+    void showFind();
+    void findNext();
+    void findPrevious();
+    int matchCount() const { return int(m_matches.size()); }
+
+    // Text selected with the mouse in View mode (Ctrl+C copies it).
+    QString selectedText() const { return m_textSel; }
+    void copySelection();
+    void selectAllText();
 
     // For tests: where a page point is on the canvas, and the canvas itself.
     QPoint canvasPoint(int row, const QPointF &pagePt) const;
@@ -109,6 +123,16 @@ private:
     Mark signatureMark(const QRectF &fit);
     QColor inkColor() const;
 
+    // ---- search and text selection
+    QString pageText(int row);
+    void runSearch(bool jump = true);
+    void goToMatch(int index);
+    void hideFind();
+    void updateFindCount();
+    void clearTextSelection();
+    void selectText(int row, const QPointF &from, const QPointF &to);
+    QPointF snapToText(int row, const QPointF &pt, bool start);
+
     Library *m_library;
     PageModel *m_model;
     Commit m_commit;
@@ -155,4 +179,26 @@ private:
     QPointer<QWidget> m_fieldEdit;
     int m_fieldRow = -1;
     QString m_editingField;
+
+    // search
+    QWidget *m_findBar;
+    QLineEdit *m_findEdit;
+    QLabel *m_findCount;
+    QTimer m_findTimer;
+    struct Match {
+        int row;
+        QList<QPolygonF> bounds; // page points
+    };
+    QVector<Match> m_matches;
+    int m_matchIndex = -1;
+    QString m_searched;
+    QHash<quint64, QString> m_textCache; // by source page
+    QHash<quint64, QVector<QRectF>> m_lineCache; // text line boxes, by source page
+
+    // text selection (View mode)
+    bool m_selecting = false;
+    int m_textRow = -1;
+    QPointF m_textFrom;
+    QString m_textSel;
+    QList<QPolygonF> m_textBounds;
 };

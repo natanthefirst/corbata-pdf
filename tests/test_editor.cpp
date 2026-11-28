@@ -7,9 +7,16 @@
 #include "DocumentView.h"
 #include "PageModel.h"
 #include "PdfWriter.h"
+#include "Printing.h"
 #include "TestPdfs.h"
 
 #include <QApplication>
+#include <QClipboard>
+#include <QFontDatabase>
+#include <QLabel>
+#include <QPdfDocument>
+#include <QPdfSelection>
+#include <QPrinter>
 #include <QAction>
 #include <QComboBox>
 #include <QFile>
@@ -119,6 +126,54 @@ int main(int argc, char **argv)
     CHECK(editor.currentRow() == 1);
     QTest::keyClick(canvas, Qt::Key_Left);
     CHECK(editor.currentRow() == 0);
+
+    // --- Search: Ctrl+F field, Enter for the next match (across pages), Esc closes.
+    editor.showFind();
+    settle();
+    QLineEdit *findText = editor.findChild<QLineEdit *>(QStringLiteral("findText"));
+    QLabel *findCount = editor.findChild<QLabel *>(QStringLiteral("findCount"));
+    CHECK(findText && findCount && findText->isVisible());
+    if (findText && findCount) {
+        QTest::keyClicks(findText, QStringLiteral("sample FORM")); // case doesn't matter
+        QTest::keyClick(findText, Qt::Key_Return);
+        settle();
+        CHECK(editor.matchCount() == 2);
+        CHECK(findCount->text() == QLatin1String("1 of 2"));
+        // Fit Page still shows the whole page with the search field open.
+        QScrollArea *area = editor.findChild<QScrollArea *>();
+        CHECK(area->verticalScrollBar()->maximum() == 0 && area->horizontalScrollBar()->maximum() == 0);
+        // CORBATA_FIND_SHOT=out.png saves a picture of a search in progress.
+        if (!qEnvironmentVariableIsEmpty("CORBATA_FIND_SHOT"))
+            editor.grab().save(qEnvironmentVariable("CORBATA_FIND_SHOT"));
+        CHECK(editor.currentRow() == 0);
+        QTest::keyClick(findText, Qt::Key_Return);
+        CHECK(findCount->text() == QLatin1String("2 of 2") && editor.currentRow() == 1);
+        QTest::keyClick(findText, Qt::Key_Return, Qt::ShiftModifier);
+        CHECK(findCount->text() == QLatin1String("1 of 2") && editor.currentRow() == 0);
+        findText->clear();
+        QTest::keyClicks(findText, QStringLiteral("nothing like this"));
+        QTest::keyClick(findText, Qt::Key_Return);
+        CHECK(editor.matchCount() == 0 && findCount->text() == QLatin1String("No matches"));
+        QTest::keyClick(findText, Qt::Key_Escape);
+        settle();
+        CHECK(!findText->isVisible());
+    }
+
+    // --- Select text with the mouse and copy it; Ctrl+A selects the page.
+    QTest::mousePress(canvas, Qt::LeftButton, {}, at(68, 44));
+    for (int i = 1; i <= 6; ++i)
+        QTest::mouseMove(canvas, at(68 + 25 * i, 54));
+    QTest::mouseRelease(canvas, Qt::LeftButton, {}, at(220, 54));
+    settle();
+    CHECK(editor.selectedText().contains(QLatin1String("Sample form")));
+    if (!qEnvironmentVariableIsEmpty("CORBATA_SELECT_SHOT"))
+        editor.grab().save(qEnvironmentVariable("CORBATA_SELECT_SHOT"));
+    QTest::keyClick(canvas, Qt::Key_C, Qt::ControlModifier);
+    CHECK(QGuiApplication::clipboard()->text().contains(QLatin1String("Sample")));
+    QTest::keyClick(canvas, Qt::Key_A, Qt::ControlModifier);
+    CHECK(editor.selectedText().contains(QLatin1String("Sample form")));
+    QTest::keyClick(canvas, Qt::Key_Escape);
+    CHECK(editor.selectedText().isEmpty());
 
     // --- Typing a page number jumps there.
     QSpinBox *pageBox = editor.findChild<QSpinBox *>(QStringLiteral("pageNumber"));
@@ -259,6 +314,24 @@ int main(int argc, char **argv)
     CHECK(saved.value(QStringLiteral("color")) == QLatin1String("Red"));
     CHECK(saved.value(QStringLiteral("state")) == QLatin1String("NY"));
     CHECK(out.size() > 0);
+
+    // --- Print (to a PDF file): every page, with the marks and filled-in values.
+    {
+        const QString printed = dir.filePath(QStringLiteral("printed.pdf"));
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(printed);
+        CHECK(Printing::print(printer, &library, model.pages(), model.fieldValues(), {0, 1}));
+        QPdfDocument doc;
+        CHECK(doc.load(printed) == QPdfDocument::Error::None);
+        CHECK(doc.pageCount() == 2);
+        const QString text = doc.getAllText(0).text();
+        // (Headless Qt on Windows has no fonts, so there's no text to find there.)
+        if (!QFontDatabase::families().isEmpty()) {
+            CHECK(text.contains(QLatin1String("Hello")));    // a typed text mark
+            CHECK(text.contains(QLatin1String("Jane Doe"))); // a filled-in field
+        }
+    }
 
     // CORBATA_UI_SHOT=out.png saves a picture of the window at this point.
     const QString shot = qEnvironmentVariable("CORBATA_UI_SHOT");

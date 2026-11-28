@@ -4,6 +4,11 @@
 
 #include <QAction>
 #include <QActionGroup>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QPdfDocument>
+#include <QPdfSelection>
+#include <QToolButton>
 #include <QComboBox>
 #include <QDate>
 #include <QDragEnterEvent>
@@ -163,7 +168,11 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
 
     // --- page navigation and zoom (always shown)
     auto *nav = new QToolBar;
-    nav->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    nav->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    nav->setIconSize(QSize(16, 16));
+    QAction *search = nav->addAction(QIcon::fromTheme(QIcon::ThemeIcon::EditFind), tr("Search"), this, [this] { showFind(); });
+    search->setToolTip(tr("Find text in the document (Ctrl+F)"));
+    nav->addSeparator();
     QAction *prev = nav->addAction(tr("◀"), this, [this] { showPage(m_current - 1); });
     prev->setToolTip(tr("Previous page (Left arrow)"));
     // The page number: type one and press Enter to go there.
@@ -206,6 +215,40 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
     bars->addStretch();
     bars->addWidget(nav);
 
+    // --- search field (Ctrl+F)
+    m_findBar = new QWidget;
+    auto *find = new QHBoxLayout(m_findBar);
+    find->setContentsMargins(8, 3, 8, 3);
+    m_findEdit = new QLineEdit;
+    m_findEdit->setObjectName(QStringLiteral("findText"));
+    m_findEdit->setPlaceholderText(tr("Find in document"));
+    m_findEdit->setClearButtonEnabled(true);
+    m_findEdit->setMaximumWidth(320);
+    m_findEdit->installEventFilter(this);
+    m_findCount = new QLabel;
+    m_findCount->setObjectName(QStringLiteral("findCount"));
+    m_findCount->setMinimumWidth(90);
+    auto button = [this](const QString &text, const QString &tip, auto fn) {
+        auto *b = new QToolButton;
+        b->setText(text);
+        b->setToolTip(tip);
+        b->setAutoRaise(true);
+        connect(b, &QToolButton::clicked, this, fn);
+        return b;
+    };
+    find->addWidget(new QLabel(tr("Find:")));
+    find->addWidget(m_findEdit);
+    find->addWidget(button(tr("↑"), tr("Previous match (Shift+Enter)"), [this] { findPrevious(); }));
+    find->addWidget(button(tr("↓"), tr("Next match (Enter)"), [this] { findNext(); }));
+    find->addWidget(m_findCount);
+    find->addStretch();
+    find->addWidget(button(tr("✕"), tr("Close (Esc)"), [this] { hideFind(); }));
+    m_findBar->hide();
+    m_findTimer.setSingleShot(true);
+    m_findTimer.setInterval(250);
+    connect(&m_findTimer, &QTimer::timeout, this, [this] { runSearch(); });
+    connect(m_findEdit, &QLineEdit::textChanged, this, [this] { m_findTimer.start(); });
+
     // --- the page
     m_canvas = new ViewCanvas(this);
     m_scroll = new QScrollArea;
@@ -217,6 +260,8 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
     surround.setColor(QPalette::Window, kSurround);
     m_scroll->viewport()->setPalette(surround);
     m_scroll->viewport()->setAutoFillBackground(true);
+    // Refit whenever the page area changes size (window resized, search field shown).
+    m_scroll->installEventFilter(this);
 
     m_empty = new QLabel(tr("Open a PDF (Ctrl+O) or drag one here."), m_scroll->viewport());
     m_empty->setAlignment(Qt::AlignCenter);
@@ -227,6 +272,7 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addLayout(bars);
+    layout->addWidget(m_findBar);
     layout->addWidget(m_scroll, 1);
 
     connect(m_model, &QAbstractItemModel::modelReset, this, [this] { reloadFromModel(); });
@@ -320,6 +366,10 @@ void DocumentView::reloadFromModel()
     m_scroll->verticalScrollBar()->setValue(vScroll);
     updateCaption();
     updateEmptyState();
+    if (m_textRow >= rowCount())
+        clearTextSelection();
+    if (m_findBar->isVisible() && !m_searched.isEmpty())
+        runSearch(false); // pages may have moved
 }
 
 void DocumentView::finishEditing()
@@ -426,6 +476,7 @@ void DocumentView::showPage(int row)
         m_current = row;
         m_selected = 0;
         m_selRow = -1;
+        clearTextSelection();
         applyFit(); // pages can differ in size
         emit currentRowChanged(row);
     }
@@ -495,6 +546,21 @@ void DocumentView::paintCanvas(QPainter &p, const QRect &exposed)
     if (m_textEdit && row == m_editRow)
         shown.removeIf([this](const Mark &m) { return m.uid == m_editingMark.uid; });
     Marks::paint(p, shown, t);
+
+    // Search matches (the current one stronger) and the text selection.
+    p.setPen(Qt::NoPen);
+    for (int i = 0; i < m_matches.size(); ++i) {
+        if (m_matches.at(i).row != row)
+            continue;
+        p.setBrush(i == m_matchIndex ? QColor(255, 140, 0, 120) : QColor(255, 230, 0, 110));
+        for (const QPolygonF &poly : m_matches.at(i).bounds)
+            p.drawPolygon(t.map(poly));
+    }
+    if (m_textRow == row && !m_textBounds.isEmpty()) {
+        p.setBrush(QColor(40, 110, 255, 70));
+        for (const QPolygonF &poly : m_textBounds)
+            p.drawPolygon(t.map(poly));
+    }
 
     if (m_fill && row == m_selRow)
         for (const Mark &m : shown)
@@ -717,6 +783,17 @@ const FieldInfo *DocumentView::fieldAt(int row, const QPointF &pt, const FieldWi
 void DocumentView::canvasPress(QMouseEvent *e)
 {
     m_canvas->setFocus();
+    if (!m_fill && e->button() == Qt::LeftButton) {
+        // View mode: drag to select text.
+        clearTextSelection();
+        const int row = rowAt(e->position());
+        if (row >= 0 && !page(row).isBlank()) {
+            m_selecting = true;
+            m_textRow = row;
+            m_textFrom = toDevice(row).inverted().map(e->position());
+        }
+        return;
+    }
     if (e->button() != Qt::LeftButton || !m_fill)
         return;
     if (m_textEdit) {
@@ -772,8 +849,12 @@ void DocumentView::canvasPress(QMouseEvent *e)
 
 void DocumentView::canvasMove(QMouseEvent *e)
 {
-    if (!m_fill)
+    if (!m_fill) {
+        if (m_selecting)
+            selectText(m_textRow, m_textFrom, toDevice(m_textRow).inverted().map(e->position()));
+        m_canvas->setCursor(rowAt(e->position()) >= 0 ? Qt::IBeamCursor : Qt::ArrowCursor);
         return;
+    }
     if (m_drag == Drag::None) {
         // Hover feedback.
         Qt::CursorShape shape = m_tool == Tool::Select ? Qt::ArrowCursor : m_tool == Tool::Text ? Qt::IBeamCursor : Qt::CrossCursor;
@@ -832,6 +913,7 @@ void DocumentView::canvasMove(QMouseEvent *e)
 
 void DocumentView::canvasRelease(QMouseEvent *)
 {
+    m_selecting = false;
     if (m_drag == Drag::None)
         return;
     const Drag drag = m_drag;
@@ -1105,6 +1187,30 @@ void DocumentView::moveToNextField(int direction)
 
 bool DocumentView::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_scroll && event->type() == QEvent::Resize) {
+        if (!m_textEdit && !m_fieldEdit)
+            applyFit();
+        updateEmptyState();
+        return false;
+    }
+    if (event->type() == QEvent::KeyPress && watched == m_findEdit) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
+            if (m_findTimer.isActive() || m_findEdit->text() != m_searched) {
+                m_findTimer.stop();
+                runSearch();
+            } else if (ke->modifiers() & Qt::ShiftModifier) {
+                findPrevious();
+            } else {
+                findNext();
+            }
+            return true;
+        }
+        if (ke->key() == Qt::Key_Escape) {
+            hideFind();
+            return true;
+        }
+    }
     if (event->type() == QEvent::KeyPress) {
         auto *ke = static_cast<QKeyEvent *>(event);
         if (watched == m_fieldEdit) {
@@ -1147,6 +1253,29 @@ bool DocumentView::canvasKey(QKeyEvent *event)
 {
     const bool plain = !(event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
     const bool nudging = m_fill && m_selected && m_selRow >= 0;
+    if (event->matches(QKeySequence::Copy)) {
+        copySelection();
+        return true;
+    }
+    if (event->matches(QKeySequence::FindNext)) {
+        findNext();
+        return true;
+    }
+    if (event->matches(QKeySequence::FindPrevious)) {
+        findPrevious();
+        return true;
+    }
+    if (!m_fill && event->matches(QKeySequence::SelectAll)) {
+        selectAllText();
+        return true;
+    }
+    if (!m_fill && event->key() == Qt::Key_Escape) {
+        if (!m_textSel.isEmpty())
+            clearTextSelection();
+        else
+            hideFind();
+        return true;
+    }
     switch (event->key()) {
     case Qt::Key_Left:
     case Qt::Key_Right:
@@ -1234,4 +1363,211 @@ bool DocumentView::canvasKey(QKeyEvent *event)
             }
     }
     return false;
+}
+
+// ---------------------------------------------------------------- search
+
+QString DocumentView::pageText(int row)
+{
+    const PageRef p = page(row);
+    QPdfDocument *doc = p.isBlank() ? nullptr : m_library->document(p.sourceId);
+    if (!doc)
+        return {};
+    const quint64 key = (quint64(quint32(p.sourceId)) << 32) | quint32(p.pageIndex);
+    auto it = m_textCache.find(key);
+    if (it == m_textCache.end())
+        it = m_textCache.insert(key, doc->getAllText(p.pageIndex).text());
+    return *it;
+}
+
+void DocumentView::showFind()
+{
+    finishEditing();
+    m_findBar->show();
+    m_findEdit->setFocus();
+    m_findEdit->selectAll();
+}
+
+void DocumentView::hideFind()
+{
+    m_findTimer.stop();
+    m_findBar->hide();
+    m_matches.clear();
+    m_matchIndex = -1;
+    m_searched.clear();
+    m_canvas->setFocus();
+    m_canvas->update();
+}
+
+void DocumentView::runSearch(bool jump)
+{
+    const QString query = m_findEdit->text().simplified();
+    const int keep = m_matchIndex;
+    m_searched = m_findEdit->text();
+    m_matches.clear();
+    m_matchIndex = -1;
+    if (!query.isEmpty()) {
+        for (int row = 0; row < rowCount(); ++row) {
+            const QString text = pageText(row);
+            if (text.isEmpty())
+                continue;
+            QPdfDocument *doc = m_library->document(page(row).sourceId);
+            for (qsizetype at = text.indexOf(query, 0, Qt::CaseInsensitive); at >= 0;
+                 at = text.indexOf(query, at + query.size(), Qt::CaseInsensitive)) {
+                const QPdfSelection sel = doc->getSelectionAtIndex(page(row).pageIndex, int(at), int(query.size()));
+                m_matches.append({row, sel.bounds()});
+            }
+        }
+    }
+    if (!jump) {
+        m_matchIndex = m_matches.isEmpty() ? -1 : qBound(0, keep, int(m_matches.size()) - 1);
+    } else if (!m_matches.isEmpty()) {
+        // Start from the page being read.
+        int first = 0;
+        for (int i = 0; i < m_matches.size(); ++i)
+            if (m_matches.at(i).row >= m_current) {
+                first = i;
+                break;
+            }
+        goToMatch(first);
+    }
+    updateFindCount();
+    m_canvas->update();
+}
+
+void DocumentView::goToMatch(int index)
+{
+    if (m_matches.isEmpty())
+        return;
+    m_matchIndex = (index % int(m_matches.size()) + int(m_matches.size())) % int(m_matches.size());
+    const Match &m = m_matches.at(m_matchIndex);
+    if (m.row != m_current)
+        showPage(m.row);
+    // Scroll the match into view.
+    QRectF box;
+    for (const QPolygonF &poly : m.bounds)
+        box |= toDevice(m.row).map(poly).boundingRect();
+    if (!box.isEmpty())
+        m_scroll->ensureVisible(int(box.center().x()), int(box.center().y()), int(box.width() / 2) + 60, 120);
+    updateFindCount();
+    m_canvas->update();
+}
+
+void DocumentView::findNext()
+{
+    if (!m_findBar->isVisible() || m_findEdit->text().isEmpty()) {
+        showFind();
+        return;
+    }
+    if (m_findEdit->text() != m_searched)
+        runSearch();
+    else
+        goToMatch(m_matchIndex + 1);
+}
+
+void DocumentView::findPrevious()
+{
+    if (!m_findBar->isVisible() || m_findEdit->text().isEmpty()) {
+        showFind();
+        return;
+    }
+    if (m_findEdit->text() != m_searched)
+        runSearch();
+    else
+        goToMatch(m_matchIndex - 1);
+}
+
+void DocumentView::updateFindCount()
+{
+    if (m_searched.trimmed().isEmpty())
+        m_findCount->setText(QString());
+    else if (m_matches.isEmpty())
+        m_findCount->setText(tr("No matches"));
+    else
+        m_findCount->setText(tr("%1 of %2").arg(m_matchIndex + 1).arg(m_matches.size()));
+}
+
+// ---------------------------------------------------------------- text selection
+
+void DocumentView::clearTextSelection()
+{
+    m_selecting = false;
+    m_textRow = -1;
+    m_textSel.clear();
+    m_textBounds.clear();
+    m_canvas->update();
+}
+
+void DocumentView::selectText(int row, const QPointF &from, const QPointF &to)
+{
+    const PageRef p = page(row);
+    QPdfDocument *doc = p.isBlank() ? nullptr : m_library->document(p.sourceId);
+    if (!doc)
+        return;
+    // Qt PDF only selects if both ends are on a character, so a drag that
+    // starts in the margin or ends past the end of a line is moved onto the
+    // nearest line of text first.
+    const bool forward = from.y() < to.y() - 2 || (qAbs(from.y() - to.y()) <= 2 && from.x() <= to.x());
+    const QPointF a = snapToText(row, forward ? from : to, true);
+    const QPointF b = snapToText(row, forward ? to : from, false);
+    const QPdfSelection sel = doc->getSelection(p.pageIndex, a, b);
+    m_textRow = row;
+    m_textSel = sel.text();
+    m_textBounds = sel.bounds();
+    m_canvas->update();
+}
+
+QPointF DocumentView::snapToText(int row, const QPointF &pt, bool start)
+{
+    const PageRef p = page(row);
+    QPdfDocument *doc = m_library->document(p.sourceId);
+    const quint64 key = (quint64(quint32(p.sourceId)) << 32) | quint32(p.pageIndex);
+    auto it = m_lineCache.find(key);
+    if (it == m_lineCache.end()) {
+        QVector<QRectF> lines;
+        for (const QPolygonF &poly : doc->getAllText(p.pageIndex).bounds())
+            lines.append(poly.boundingRect());
+        it = m_lineCache.insert(key, lines);
+    }
+    // The line the point is on, or the closest one above/below it.
+    const QRectF *best = nullptr;
+    qreal bestDist = 1e9;
+    for (const QRectF &r : *it) {
+        const qreal dy = pt.y() < r.top() ? r.top() - pt.y() : pt.y() > r.bottom() ? pt.y() - r.bottom() : 0;
+        const qreal dx = pt.x() < r.left() ? r.left() - pt.x() : pt.x() > r.right() ? pt.x() - r.right() : 0;
+        const qreal d = dy * 4 + dx; // lines matter more than columns
+        if (d < bestDist) {
+            bestDist = d;
+            best = &r;
+        }
+    }
+    if (!best)
+        return pt;
+    // Inside the line box, by half a character from the edge it was beyond.
+    const qreal inset = qMin(2.0, best->width() / 4);
+    qreal x = qBound(best->left() + inset, pt.x(), best->right() - inset);
+    if (pt.y() < best->top())
+        x = start ? best->left() + inset : best->right() - inset; // a line below the point: from its start
+    else if (pt.y() > best->bottom())
+        x = start ? best->left() + inset : best->right() - inset;
+    return QPointF(x, best->center().y());
+}
+
+void DocumentView::selectAllText()
+{
+    const PageRef p = page(m_current);
+    QPdfDocument *doc = p.isBlank() ? nullptr : m_library->document(p.sourceId);
+    if (!doc)
+        return;
+    const QPdfSelection sel = doc->getAllText(p.pageIndex);
+    m_textRow = m_current;
+    m_textSel = sel.text();
+    m_textBounds = sel.bounds();
+    m_canvas->update();
+}
+
+void DocumentView::copySelection()
+{
+    if (!m_textSel.isEmpty())
+        QGuiApplication::clipboard()->setText(m_textSel);
 }

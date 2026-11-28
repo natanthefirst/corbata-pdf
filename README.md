@@ -40,6 +40,9 @@ Corbata PDF has three modes, switched with the buttons in the toolbar. Opening a
 |---|---|
 | **Read** | One page at a time. ← / → (or ◀ ▶, Page Up / Page Down, or the mouse wheel when the whole page fits) turn pages |
 | **Zoom** | **Fit Page** (the whole page) or **Fit Width** (as wide as the window, scroll for the rest); both follow the window size. Ctrl+mouse wheel or − / + for any other size |
+| **Go to a page** | Type its number in the page box and press Enter |
+| **Search** | Ctrl+F or **Search**: matches are highlighted; Enter / Shift+Enter (or F3 / Shift+F3) go to the next / previous one, across pages; Esc closes |
+| **Copy text** | Drag over text to select it, Ctrl+C to copy; Ctrl+A selects the whole page |
 
 **Fill & Sign** (Ctrl+2): the same page view, with tools
 
@@ -64,7 +67,10 @@ Corbata PDF has three modes, switched with the buttons in the toolbar. Opening a
 | **Duplicate / Blank** | Ctrl+D duplicates selected pages, Ctrl+B inserts a blank page (same size as its neighbour) |
 | **Back to reading** | Double-click a page (or press Space) to open it in View |
 
-In both modes: **Undo / Redo** (Ctrl+Z / Ctrl+Y) for every change until you close the document, and
+**Print** (Ctrl+P or File ▸ Print): all pages, a range, or the current page, with filled-in fields and
+Fill & Sign marks; each page is scaled (and turned if needed) to fit the paper.
+
+In every mode: **Undo / Redo** (Ctrl+Z / Ctrl+Y) for every change until you close the document, and
 File ▸ Make Default PDF App (also offered once on first launch; Windows sends you to Settings to confirm, macOS asks).
 
 In Edit, Ctrl+mouse wheel (or the slider in the status bar) changes the thumbnail size. On macOS, Ctrl is ⌘.
@@ -80,7 +86,7 @@ Everything below is only needed to change and build the app yourself, not to use
 * `src/PdfWriter.cpp` – assembles the output PDF from a list of page references (the only code that writes PDFs):
   copies pages, burns in Fill & Sign marks, fills form fields and carries the form (`/AcroForm`) over.
 * `src/MainWindow.cpp` – actions, menus, undo (each change stores a snapshot of the pages and form values).
-* `src/DocumentView.cpp` – the page view used by View and Fill & Sign (tools and form filling only in Fill & Sign); `src/SignatureDialog.cpp` – draw / type / import a signature.
+* `src/DocumentView.cpp` – the page view used by View and Fill & Sign (tools and form filling only in Fill & Sign); `src/SignatureDialog.cpp` – draw / type / import a signature. `src/Printing.cpp` – printing.
 * `src/Marks.cpp` – text, check marks and signatures, drawn identically on screen and in the PDF.
 * `src/FormFields.cpp` – reads fillable form fields with qpdf.
 * `src/PageGrid.cpp` – thumbnail grid, drag-and-drop, drop indicator.
