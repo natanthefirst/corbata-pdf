@@ -166,10 +166,24 @@ DocumentView::DocumentView(Library *library, PageModel *model, Commit commit, QW
     nav->setToolButtonStyle(Qt::ToolButtonTextOnly);
     QAction *prev = nav->addAction(tr("◀"), this, [this] { showPage(m_current - 1); });
     prev->setToolTip(tr("Previous page (Left arrow)"));
-    m_caption = new QLabel;
-    m_caption->setMinimumWidth(80);
-    m_caption->setAlignment(Qt::AlignCenter);
-    nav->addWidget(m_caption);
+    // The page number: type one and press Enter to go there.
+    m_pageBox = new QSpinBox;
+    m_pageBox->setObjectName(QStringLiteral("pageNumber"));
+    m_pageBox->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_pageBox->setAlignment(Qt::AlignRight);
+    m_pageBox->setKeyboardTracking(false);
+    m_pageBox->setMinimumWidth(44);
+    m_pageBox->setToolTip(tr("Type a page number and press Enter"));
+    m_pageBox->setRange(0, 0);
+    connect(m_pageBox, &QSpinBox::editingFinished, this, [this] {
+        showPage(m_pageBox->value() - 1);
+        updateCaption();
+        m_canvas->setFocus();
+    });
+    m_pageTotal = new QLabel;
+    m_pageTotal->setMinimumWidth(40);
+    nav->addWidget(m_pageBox);
+    nav->addWidget(m_pageTotal);
     QAction *next = nav->addAction(tr("▶"), this, [this] { showPage(m_current + 1); });
     next->setToolTip(tr("Next page (Right arrow)"));
     nav->addSeparator();
@@ -423,7 +437,11 @@ void DocumentView::showPage(int row)
 void DocumentView::updateCaption()
 {
     const int n = rowCount();
-    m_caption->setText(n ? tr("%1 / %2").arg(m_current + 1).arg(n) : QString());
+    const QSignalBlocker block(m_pageBox);
+    m_pageBox->setRange(n ? 1 : 0, n);
+    m_pageBox->setValue(n ? m_current + 1 : 0);
+    m_pageBox->setEnabled(n > 0);
+    m_pageTotal->setText(n ? tr(" / %1").arg(n) : QString());
 }
 
 void DocumentView::updateEmptyState()

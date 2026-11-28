@@ -130,7 +130,8 @@ private:
         QImage image;
     };
     QHash<quint64, Cached> m_images; // by page uid
-    QLabel *m_caption;
+    QSpinBox *m_pageBox;  // current page, editable
+    QLabel *m_pageTotal;  // "/ 12"
     QSpinBox *m_fontSize;
     QComboBox *m_color;
     QActionGroup *m_tools;

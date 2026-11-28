@@ -17,6 +17,7 @@
 #include <QPlainTextEdit>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUndoStack>
@@ -118,6 +119,20 @@ int main(int argc, char **argv)
     CHECK(editor.currentRow() == 1);
     QTest::keyClick(canvas, Qt::Key_Left);
     CHECK(editor.currentRow() == 0);
+
+    // --- Typing a page number jumps there.
+    QSpinBox *pageBox = editor.findChild<QSpinBox *>(QStringLiteral("pageNumber"));
+    CHECK(pageBox && pageBox->value() == 1 && pageBox->maximum() == 2);
+    if (pageBox) {
+        pageBox->setFocus();
+        pageBox->selectAll();
+        QTest::keyClicks(pageBox, QStringLiteral("2"));
+        QTest::keyClick(pageBox, Qt::Key_Return);
+        settle();
+        CHECK(editor.currentRow() == 1);
+        QTest::keyClick(canvas, Qt::Key_Left);
+        CHECK(editor.currentRow() == 0 && pageBox->value() == 1);
+    }
 
     // --- Fit Width: the page spans the window's width (minus margins and the
     // scroll bar) and follows the window size; Fit Page shows all of it.
