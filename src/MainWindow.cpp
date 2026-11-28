@@ -5,6 +5,9 @@
 #include "PageModel.h"
 #include "PdfWriter.h"
 #include "Printing.h"
+#ifdef Q_OS_WIN
+#include "WinPrint.h"
+#endif
 #include "DocumentView.h"
 
 #include <QAction>
@@ -969,6 +972,26 @@ void MainWindow::print()
     const PageList pages = m_model->pages();
     if (pages.isEmpty())
         return;
+#ifdef Q_OS_WIN
+    // The Windows print dialog with its print preview.
+    const FieldValues fields = m_model->fieldValues();
+    const WinPrint::Result result = WinPrint::print(
+        this, baseName(), int(pages.size()), [this, pages, fields](int index, const QSizeF &paper, qreal dpi) {
+            return Printing::paperImage(m_library, pages.value(index), fields, paper, dpi);
+        });
+    switch (result) {
+    case WinPrint::Result::Printed:
+        statusBar()->showMessage(tr("Sent to the printer"), 4000);
+        return;
+    case WinPrint::Result::Cancelled:
+        return;
+    case WinPrint::Result::Failed:
+        QMessageBox::warning(this, tr("Print"), tr("The document could not be printed."));
+        return;
+    case WinPrint::Result::Unavailable:
+        break; // fall back to Qt's print dialog below
+    }
+#endif
     QPrinter printer(QPrinter::HighResolution);
     printer.setDocName(baseName());
     QPrintDialog dlg(&printer, this);

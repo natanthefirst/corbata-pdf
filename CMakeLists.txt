@@ -38,6 +38,11 @@ add_library(corbata_ui STATIC
     src/Printing.cpp src/Printing.h
 )
 target_link_libraries(corbata_ui PUBLIC corbata_core Qt6::Widgets Qt6::Pdf Qt6::PrintSupport)
+if(WIN32)
+    # The Windows print dialog with live preview (Windows.Graphics.Printing, C++/WinRT).
+    target_sources(corbata_ui PRIVATE src/WinPrint.cpp src/WinPrint.h)
+    target_link_libraries(corbata_ui PUBLIC windowsapp d3d11 d2d1 dxgi windowscodecs ole32)
+endif()
 
 # --- The app
 set(APP_SOURCES

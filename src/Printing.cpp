@@ -9,6 +9,57 @@
 
 namespace Printing {
 
+void drawPage(QPainter &painter, const QRectF &paper, qreal dpi, Library *library, const PageRef &ref,
+              const FieldValues &fields)
+{
+    QSizeF disp = ref.displaySize();
+    if (disp.isEmpty())
+        disp = QSizeF(612, 792);
+
+    // Turn the page if that makes it fit the paper better.
+    const bool turn = (disp.width() > disp.height()) != (paper.width() > paper.height());
+    const QSizeF upright = turn ? disp.transposed() : disp;
+    const QSizeF fitted = upright.scaled(paper.size(), Qt::KeepAspectRatio);
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.translate(paper.center());
+    if (turn)
+        painter.rotate(90);
+    const QSizeF drawn = turn ? fitted.transposed() : fitted; // in the page's own orientation
+    const QRectF target(QPointF(-drawn.width() / 2, -drawn.height() / 2), drawn);
+
+    painter.fillRect(target, Qt::white);
+    if (!ref.isBlank()) {
+        const int px = int(qMax(disp.width(), disp.height()) * dpi / 72.0);
+        QImage img = library->render(ref.sourceId, ref.pageIndex, px);
+        if (ref.rotation)
+            img = img.transformed(QTransform().rotate(ref.rotation), Qt::SmoothTransformation);
+        if (!img.isNull())
+            painter.drawImage(target, img);
+    }
+    const QTransform toPage = pageToTarget(ref, target);
+    if (!ref.isBlank()) {
+        const QHash<QString, QString> changed = fields.value(ref.sourceId);
+        if (!changed.isEmpty())
+            FormFields::paint(painter, library->fields(ref.sourceId), changed, ref.pageIndex, toPage, false);
+    }
+    Marks::paint(painter, ref.marks, toPage);
+    painter.restore();
+}
+
+QImage paperImage(Library *library, const PageRef &page, const FieldValues &fields, const QSizeF &paperPoints,
+                  qreal dpi)
+{
+    const QSize px = (paperPoints * dpi / 72.0).toSize().expandedTo(QSize(1, 1));
+    QImage img(px, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::white);
+    QPainter painter(&img);
+    drawPage(painter, QRectF(QPointF(0, 0), QSizeF(px)), dpi, library, page, fields);
+    painter.end();
+    return img;
+}
+
 bool print(QPrinter &printer, Library *library, const PageList &pages, const FieldValues &fields,
            const QList<int> &rows, QWidget *parent)
 {
@@ -17,8 +68,6 @@ bool print(QPrinter &printer, Library *library, const PageList &pages, const Fie
     QPainter painter;
     if (!painter.begin(&printer))
         return false;
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
     QProgressDialog progress(QApplication::translate("Printing", "Printing…"),
                              QApplication::translate("Printing", "Cancel"), 0, int(rows.size()), parent);
@@ -37,39 +86,7 @@ bool print(QPrinter &printer, Library *library, const PageList &pages, const Fie
         }
         if (i > 0 && !printer.newPage())
             return false;
-        const PageRef ref = pages.value(rows.at(i));
-        QSizeF disp = ref.displaySize();
-        if (disp.isEmpty())
-            disp = QSizeF(612, 792);
-
-        // Turn the page if that makes it fit the paper better.
-        const bool turn = (disp.width() > disp.height()) != (paper.width() > paper.height());
-        const QSizeF upright = turn ? disp.transposed() : disp;
-        const QSizeF fitted = upright.scaled(paper.size(), Qt::KeepAspectRatio);
-        painter.save();
-        painter.translate(paper.center());
-        if (turn)
-            painter.rotate(90);
-        const QSizeF drawn = turn ? fitted.transposed() : fitted; // in the page's own orientation
-        const QRectF target(QPointF(-drawn.width() / 2, -drawn.height() / 2), drawn);
-
-        painter.fillRect(target, Qt::white);
-        if (!ref.isBlank()) {
-            const int px = int(qMax(disp.width(), disp.height()) * dpi / 72.0);
-            QImage img = library->render(ref.sourceId, ref.pageIndex, px);
-            if (ref.rotation)
-                img = img.transformed(QTransform().rotate(ref.rotation), Qt::SmoothTransformation);
-            if (!img.isNull())
-                painter.drawImage(target, img);
-        }
-        const QTransform toPage = pageToTarget(ref, target);
-        if (!ref.isBlank()) {
-            const QHash<QString, QString> changed = fields.value(ref.sourceId);
-            if (!changed.isEmpty())
-                FormFields::paint(painter, library->fields(ref.sourceId), changed, ref.pageIndex, toPage, false);
-        }
-        Marks::paint(painter, ref.marks, toPage);
-        painter.restore();
+        drawPage(painter, paper, dpi, library, pages.value(rows.at(i)), fields);
     }
     progress.setValue(int(rows.size()));
     return painter.end();

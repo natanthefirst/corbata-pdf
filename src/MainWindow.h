@@ -27,6 +27,8 @@ public:
     void openFiles(const QStringList &paths);
     // Opens if nothing is open, otherwise appends.
     void openOrAppend(const QStringList &paths);
+    // Shows the print dialog (with print preview on Windows).
+    void print();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -69,7 +71,6 @@ private:
     void moveSelection(int direction);
     void reverseSelected();
     void preview();
-    void print();
     void showContextMenu(const QPoint &pos);
     void setZoom(int px);
     void about();

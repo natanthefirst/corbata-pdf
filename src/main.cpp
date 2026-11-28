@@ -53,6 +53,9 @@ int main(int argc, char *argv[])
         QTimer::singleShot(0, &w, [&w, files] { w.openFiles(files); });
 
     // Test hook: CORBATA_SCREENSHOT=out.png saves a window screenshot and quits.
+    // Test hook: CORBATA_PRINT_ON_START=1 opens the print dialog after the file has loaded.
+    if (qEnvironmentVariableIsSet("CORBATA_PRINT_ON_START"))
+        QTimer::singleShot(1500, &w, [&w] { w.print(); });
     const QString shot = qEnvironmentVariable("CORBATA_SCREENSHOT");
     if (!shot.isEmpty()) {
         QTimer::singleShot(2500, &w, [&w, shot] {
