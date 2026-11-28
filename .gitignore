@@ -6,3 +6,4 @@ resources/AppIcon.icns
 .vs/
 *.user
 .DS_Store
+*.log
